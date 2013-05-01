@@ -94,6 +94,22 @@ findMany :: (HasMany parent child) => Connection -> parent -> IO [child]
 findMany = rdChildrenOf hasManyInfo
 
 
+data JoinTable a b = JoinTable {
+    ref_a :: !(DBRef a)
+  , ref_b :: !(DBRef b)
+  } deriving (Show, Eq)
+
+{-
+joinTableModelInfo :: (Model a, Model b) => ModelInfo (JoinTable a b)
+joinTableModelInfo = mi
+  where getmis :: (Model a, Model b) =>
+                  ModelInfo (JoinTable a b) -> (ModelInfo a, ModelInfo b)
+        getmis _ = (modelInfo, modelInfo)
+        (mia, mib) = getmis mi
+        mi = undefined
+-}
+
+
 data JoinInfo a b = JoinInfo {
   joinQuery :: !Query
   } deriving (Show)
@@ -112,6 +128,11 @@ findJoin = jtJoinOf joinInfo
 {-
 select Post.*, User.* from Post, User, Comment where Comment.postId =
 	 Post.id and Comment.userId = User.id
+
+<aalevy> prefix is the table name referenced, suffix is the column
+	 name referenced  [15:54]
+<aalevy> so, "post_id" for example
+<aalevy> or, i guess "postId"
 -}
 
 data Bar = Bar {
