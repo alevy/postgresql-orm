@@ -20,26 +20,26 @@ import Database.PostgreSQL.ORM.Model
 
 import Data.Int
 
-data RefDescriptor r c p = RefDescriptor {
+data RefDescriptor r child parent = RefDescriptor {
     refDescRefColumn :: !Int
-  , refDescSelector :: !(c -> r p)
+  , refDescSelector :: !(child -> r parent)
   , refDescQuery :: !Query
   }
-instance (Model c) => Show (RefDescriptor r c p) where
+instance (Model child) => Show (RefDescriptor r child parent) where
   show rd = "RefDescriptor " ++ show c ++ " " ++
             S8.unpack (modelColumns mi !! c) ++ " " ++
             show (refDescQuery rd)
     where c = refDescRefColumn rd
-          getmi :: (Model c) => RefDescriptor r c p -> ModelInfo c
+          getmi :: (Model c) => RefDescriptor r c parent -> ModelInfo c
           getmi _ = modelInfo
           mi = getmi rd
 
 
-defaultRefDescriptor :: (Model c, Generic c
-                        , GHasMaybeField (Rep c) (r p) TYes) =>
-                        RefDescriptor r c p
+defaultRefDescriptor :: (Model child, Generic child
+                        , GHasMaybeField (Rep child) (r parent) TYes) =>
+                        RefDescriptor r child parent
 defaultRefDescriptor = rd
-  where getTypes :: RefDescriptor r c p -> (c, r p)
+  where getTypes :: RefDescriptor r child parent -> (child, r parent)
         getTypes _ = (undefined, undefined)
         (c, rh) = getTypes rd
         cols = modelColumns $ modelToInfo c
@@ -55,29 +55,31 @@ defaultRefDescriptor = rd
           , refDescQuery = Query qstr
           }
 
-class (Model p, Model c) => HasOne p c where
-  hasOneDesc :: RefDescriptor DBURef c p
-  default hasOneDesc :: (Model c, Generic c
-                        , GHasMaybeField (Rep c) (DBURef p) TYes) =>
-                        RefDescriptor DBURef c p
+class (Model parent, Model child) => HasOne parent child where
+  hasOneDesc :: RefDescriptor DBURef child parent
+  default hasOneDesc :: (Model child, Generic child
+                        , GHasMaybeField (Rep child) (DBURef parent) TYes) =>
+                        RefDescriptor DBURef child parent
   {-# INLINE hasOneDesc #-}
   hasOneDesc = defaultRefDescriptor
 
-class (Model p, Model c) => HasMany p c where
-  hasManyDesc :: RefDescriptor DBRef c p
-  default hasManyDesc :: (Model c, Generic c
-                         , GHasMaybeField (Rep c) (DBRef p) TYes) =>
-                         RefDescriptor DBRef c p
+class (Model parent, Model child) => HasMany parent child where
+  hasManyDesc :: RefDescriptor DBRef child parent
+  default hasManyDesc :: (Model child, Generic child
+                         , GHasMaybeField (Rep child) (DBRef parent) TYes) =>
+                         RefDescriptor DBRef child parent
   {-# INLINE hasManyDesc #-}
   hasManyDesc = defaultRefDescriptor
 
 
-rdParentOf :: (IsDBRef r, Model p) =>
-              RefDescriptor r c p -> Connection -> c -> IO (Maybe p)
+rdParentOf :: (IsDBRef r, Model parent) =>
+              RefDescriptor r child parent -> Connection -> child
+              -> IO (Maybe parent)
 rdParentOf rd conn c = findRef conn $ refDescSelector rd c
 
-rdChildrenOf :: (Model c, IsDBRef r, Model p) =>
-                RefDescriptor r c p -> Connection -> p -> IO [c]
+rdChildrenOf :: (Model child, IsDBRef r, Model parent) =>
+                RefDescriptor r child parent -> Connection -> parent
+                -> IO [child]
 rdChildrenOf rd conn p =
   map lookupRow <$> query conn (refDescQuery rd) (Only $ primaryKey p)
 
