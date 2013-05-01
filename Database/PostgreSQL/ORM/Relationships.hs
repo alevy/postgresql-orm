@@ -1,11 +1,13 @@
 {-# LANGUAGE DefaultSignatures #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 
 module Database.PostgreSQL.ORM.Relationships where
 
 import qualified Data.ByteString as S
+import qualified Data.ByteString.Char8 as S8
 import Data.Maybe
 import GHC.Generics
 
@@ -15,11 +17,16 @@ import Database.PostgreSQL.ORM.Model
 import Data.Int
 
 data RefDescriptor b r = RefDescriptor {
-    refDescColumn :: !S.ByteString
+    refDescRefColumn :: !Int
   , refDescSelector :: !(b -> r)
   }
-instance Show (RefDescriptor b r) where
-  show rd = "RefDescriptor " ++ show (refDescColumn rd) ++ " ?"
+instance (Model b) => Show (RefDescriptor b r) where
+  show rd = "RefDescriptor " ++ show c ++ " " ++
+            S8.unpack (modelColumns mi !! c)
+    where c = refDescRefColumn rd
+          getmi :: (Model b) => RefDescriptor b r -> ModelInfo b
+          getmi _ = modelInfo
+          mi = getmi rd
 
 
 defaultRefDescriptor :: (Model b, Generic b, GHasMaybeField (Rep b) r TYes) =>
@@ -29,8 +36,7 @@ defaultRefDescriptor = rd
         getTypes _ = (undefined, undefined)
         (b, r) = getTypes rd
         rd = RefDescriptor {
-            refDescColumn = modelColumns (modelToInfo b) !!
-                            getMaybeFieldPos b r
+            refDescRefColumn = getMaybeFieldPos b r
           , refDescSelector = fromJust . getMaybeFieldVal
           }
 
