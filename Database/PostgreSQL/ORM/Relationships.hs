@@ -84,6 +84,16 @@ rdChildrenOf rd conn p =
   map lookupRow <$> query conn (refDescQuery rd) (Only $ primaryKey p)
 
 
+findOne :: (HasOne parent child) => Connection -> parent -> IO (Maybe child)
+findOne c p = do
+  rs <- rdChildrenOf hasOneDesc c p
+  case rs of [r] -> return $ Just r
+             _   -> return Nothing
+
+findMany :: (HasMany parent child) => Connection -> parent -> IO [child]
+findMany = rdChildrenOf hasManyDesc
+
+
 data Bar = Bar {
   bar_key :: !DBKey
   , bar_none :: !Int32
