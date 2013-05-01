@@ -10,9 +10,9 @@ library
   build-depends: base < 6
                , postgresql-simple
   ghc-options: -Wall
-  exposed-modules: Database.PostgreSQL.ORM.Model
-                 , Database.PostgreSQL.ORM.TrustedTypes   
-                 , Database.PostgreSQL.ORM.PoisonNoSelector
+  exposed-modules: Database.PostgreSQL.ORM.Fields
+                 , Database.PostgreSQL.ORM.Model
+                 , Database.PostgreSQL.ORM.RequireSelector
   other-extensions: DefaultSignatures
                   , DeriveGeneric
                   , FlexibleContexts

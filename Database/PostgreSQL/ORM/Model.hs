@@ -3,7 +3,7 @@
 
 module Database.PostgreSQL.ORM.Model (
     DBKeyType, DBKey(..), isNullKey
-    , Model(..), ModelInfo(..)
+    , Model(..), ModelInfo(..), modelToInfo, modelName, primaryKey
     , LookupRow(..), UpdateRow(..), InsertRow(..)
     , DBRef(..), mkDBRef, dbRefToInfo
       -- * Database operations
@@ -15,11 +15,14 @@ module Database.PostgreSQL.ORM.Model (
     , defaultModelLookupQuery, defaultModelUpdateQuery, defaultModelInsertQuery
       -- * Low-level functions for generic FromRow/ToRow
     , GFromRow(..), defaultFromRow, GToRow(..), defaultToRow
+      -- * Helper functions
+    , quoteIdent
     ) where
 
 import Control.Applicative
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Char8 as S8
+import Data.Char
 import Data.Int
 import Data.Monoid
 import Data.List
@@ -85,6 +88,8 @@ data ModelInfo a = Model {
     -- order in which 'modelRead' parses them).  The default is to use
     -- the Haskell field names for @a@.  This default will fail to
     -- compile if @a@ is not defined using record syntax.
+  , modelPrimaryColumn :: !Int
+    -- ^ The 0-based index of the primary key column in 'modelColumns'
   , modelGetPrimaryKey :: !(a -> DBKey)
     -- ^ Return the primary key of a particular model instance.
   , modelRead :: !(RowParser a)
@@ -109,17 +114,20 @@ data ModelInfo a = Model {
 
 instance Show (ModelInfo a) where
   show a = intercalate " " ["Model", show $ modelInfoName a
-                           , show $ modelColumns a, "???"
+                           , show $ modelColumns a, show $ modelPrimaryColumn a
+                           , "???"
                            , show $ fromQuery $ modelLookupQuery a
                            , show $ fromQuery $ modelInsertQuery a
                            , show $ fromQuery $ modelUpdateQuery a]
 
 class GDatatypeName f where
-  gDatatypeName :: f p -> S.ByteString
+  gDatatypeName :: f p -> String
 instance (Datatype c) => GDatatypeName (M1 i c f) where 
-  gDatatypeName a = fromString $ datatypeName a
+  gDatatypeName a = datatypeName a
 defaultModelInfoName :: (Generic a, GDatatypeName (Rep a)) => a -> S.ByteString
-defaultModelInfoName = gDatatypeName . from
+defaultModelInfoName = fromString . maybeFold. gDatatypeName . from
+  where maybeFold s | h:t <- s, not (any isUpper t) = toLower h:t
+                    | otherwise                     = s
 
 class GColumns f where
   gColumns :: f p -> [S.ByteString]
@@ -207,6 +215,9 @@ q iden = S8.pack $ '"' : (go $ S8.unpack iden)
         go (c:cs)   = c:go cs
         go []       = '"':[]
 
+quoteIdent :: S.ByteString -> S.ByteString
+quoteIdent = q
+
 fmtCols :: [S.ByteString] -> S.ByteString
 fmtCols cs = "(" <> S.intercalate ", " (map q cs) <> ")"
 
@@ -247,6 +258,7 @@ defaultModelInfo :: (Generic a, GToRow (Rep a), GFromRow (Rep a)
 defaultModelInfo = m
   where m = Model { modelInfoName = mname
                   , modelColumns = cols
+                  , modelPrimaryColumn = pki
                   , modelGetPrimaryKey = defaultModelGetPrimaryKey
                   , modelRead = defaultModelRead
                   , modelWrite = defaultModelWrite pki

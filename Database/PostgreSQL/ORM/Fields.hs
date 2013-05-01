@@ -1,7 +1,7 @@
 {-# LANGUAGE CPP, FlexibleInstances, FlexibleContexts, TypeOperators #-}
 {-# LANGUAGE DeriveGeneric, OverloadedStrings #-}
 
-module PostgresOps where
+module Database.PostgreSQL.ORM.Fields where
 
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Char8 as S8
@@ -15,11 +15,10 @@ import Database.PostgreSQL.Simple
 import Database.PostgreSQL.Simple.FromField
 import Database.PostgreSQL.Simple.Time
 import Database.PostgreSQL.Simple.ToField
-import Database.PostgreSQL.Simple.ToRow
 import Database.PostgreSQL.Simple.Types
 import Database.PostgreSQL.Simple.TypeInfo.Static
 
-import GenericRow
+import Database.PostgreSQL.ORM.Model
 
 import GHC.Generics
 
@@ -64,10 +63,12 @@ instance (SqlType a) => SqlType (Maybe a) where
   sqlType ~(Just a) = sqlBaseType a
   sqlBaseType _ = error "Table field Maybe should not be wrapped in other type"
 
-instance (Table a) => SqlType (DBRef a) where
+instance (Model a) => SqlType (DBRef a) where
   sqlBaseType r@(DBRef k) = sqlBaseType k <> ref
-    where t = dbRefTable r
-          ref = " references " <> tableName t <> "(" <> primaryColumn t <> ")"
+    where t = dbRefToInfo r
+          ref = S.concat [
+              " references ", quoteIdent (modelInfoName t) , "("
+              , quoteIdent (modelColumns t !! modelPrimaryColumn t), ")" ]
 
 class GDefTypes f where
   gDefTypes :: f p -> [S.ByteString]
@@ -79,24 +80,30 @@ instance (GDefTypes f) => GDefTypes (M1 i c f) where
   gDefTypes ~(M1 fp) = gDefTypes fp
 
 
-createTable :: (Table a, Generic a, GDefTypes (Rep a)) => a -> Query
-createTable a = Query $ "create table " <> tableName a <> " ("
-                <> S.intercalate ", " (go types names) <> ")"
+createTableWithTypes :: (Model a, Generic a, GDefTypes (Rep a)) =>
+                        [(S.ByteString, S.ByteString)] -> a -> Query
+createTableWithTypes except a = Query $ S.concat [
+  "create table ", quoteIdent $ modelInfoName info, " ("
+  , S.intercalate ", " (go types names), ")"
+  ]
   where types = gDefTypes $ from a
-        names = tableColumns a
-        except = columnTypes a
+        info = modelToInfo a
+        names = modelColumns info
         go (t:ts) (n:ns)
-          | Just t' <- lookup n except = n <> " " <> t' : go ts ns
-          | otherwise = n <> " " <> t : go ts ns
+          | Just t' <- lookup n except = quoteIdent n <> " " <> t' : go ts ns
+          | otherwise = quoteIdent n <> " " <> t : go ts ns
         go [] [] = []
-        go _ _ = error $ "createTable: " ++ S8.unpack (tableName a)
+        go _ _ = error $ "createTable: " ++ S8.unpack (modelInfoName info)
                  ++ " has incorrect number of columns"
 
-{-
-saveQuery :: (Table a) => a -> Query
-saveQuery a0 =
-  where insq 
--}
+
+class (Model a, Generic a, GDefTypes (Rep a)) => CreateTable a where
+  createTableTypes :: ModelInfo a -> [(S.ByteString, S.ByteString)]
+  createTableTypes _ = []
+
+createTable :: (CreateTable a) => a -> Query
+createTable a = createTableWithTypes (createTableTypes $ modelToInfo a) a
+
 
 data Bar = Bar {
   barKey :: !DBKey
@@ -105,7 +112,9 @@ data Bar = Bar {
   , barParent :: !(Maybe (DBRef Bar))
   } deriving (Show, Generic)
                                     
-instance Table Bar
+instance Model Bar
+instance CreateTable Bar where
+  createTableTypes _ = [("barString", "varchar(16)")]
 
 bar :: Bar
 bar = Bar (DBKey 4) 77 "hi" Nothing
