@@ -3,12 +3,14 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE OverloadedStrings #-}
 
 module Database.PostgreSQL.ORM.Relationships where
 
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Char8 as S8
 import Data.Maybe
+import Database.PostgreSQL.Simple.Types
 import GHC.Generics
 
 import Database.PostgreSQL.ORM.HasField
@@ -19,10 +21,12 @@ import Data.Int
 data RefDescriptor b r = RefDescriptor {
     refDescRefColumn :: !Int
   , refDescSelector :: !(b -> r)
+  , refDescQuery :: !Query
   }
 instance (Model b) => Show (RefDescriptor b r) where
   show rd = "RefDescriptor " ++ show c ++ " " ++
-            S8.unpack (modelColumns mi !! c)
+            S8.unpack (modelColumns mi !! c) ++ " " ++
+            show (refDescQuery rd)
     where c = refDescRefColumn rd
           getmi :: (Model b) => RefDescriptor b r -> ModelInfo b
           getmi _ = modelInfo
@@ -35,9 +39,17 @@ defaultRefDescriptor = rd
   where getTypes :: RefDescriptor b r -> (b, r)
         getTypes _ = (undefined, undefined)
         (b, r) = getTypes rd
+        cols = modelColumns $ modelToInfo b
+        colno = getMaybeFieldPos b r
+        qstr = S.concat [
+          "select "
+          , S.intercalate ", " (map quoteIdent cols)
+          , " from ", quoteIdent (modelName b), " where "
+          , quoteIdent (cols !! colno), " = ?"]
         rd = RefDescriptor {
-            refDescRefColumn = getMaybeFieldPos b r
+            refDescRefColumn = colno
           , refDescSelector = fromJust . getMaybeFieldVal
+          , refDescQuery = Query qstr
           }
 
 class HasOne h b where
