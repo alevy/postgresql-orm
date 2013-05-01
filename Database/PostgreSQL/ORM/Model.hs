@@ -218,16 +218,16 @@ q iden = S8.pack $ '"' : (go $ S8.unpack iden)
 quoteIdent :: S.ByteString -> S.ByteString
 quoteIdent = q
 
-fmtCols :: [S.ByteString] -> S.ByteString
-fmtCols cs = "(" <> S.intercalate ", " (map q cs) <> ")"
-
+fmtCols :: Bool -> [S.ByteString] -> S.ByteString
+fmtCols False cs = S.intercalate ", " (map q cs)
+fmtCols True cs = "(" <> fmtCols False cs <> ")"
 
 defaultModelLookupQuery :: S.ByteString -- ^ Name of database table
                            -> [S.ByteString] -- ^ Names of columns
                            -> Int            -- ^ Index of primary key field
                            -> Query
 defaultModelLookupQuery t cs pki = Query $ S.concat [
-  "select ", fmtCols cs, " from ", q t, " where ", q (cs !! pki), " = ?"
+  "select ", fmtCols False cs, " from ", q t, " where ", q (cs !! pki), " = ?"
   ]
 
 defaultModelUpdateQuery :: S.ByteString -- ^ Name of database table
@@ -245,9 +245,9 @@ defaultModelInsertQuery :: S.ByteString -- ^ Name of database table
                            -> Int            -- ^ Index of primary key field
                            -> Query
 defaultModelInsertQuery t cs0 pki = Query $ S.concat $ [
-  "insert into ", q t, " ", fmtCols cs1, " values ("
+  "insert into ", q t, " ", fmtCols True cs1, " values ("
   , S.intercalate ", " $ map (const "?") cs1
-  , ") returning ", fmtCols cs0
+  , ") returning ", fmtCols False cs0
   ]
   where cs1 = deleteAt pki cs0
 

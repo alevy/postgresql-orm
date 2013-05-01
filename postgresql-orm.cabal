@@ -8,14 +8,16 @@ author: Amit Levy and David Mazieres
 library
   default-language: Haskell2010
   build-depends: base < 6
+               , bytestring
                , postgresql-simple
+               , text
+               , time
   ghc-options: -Wall
   exposed-modules: Database.PostgreSQL.ORM.Fields
                  , Database.PostgreSQL.ORM.Model
                  , Database.PostgreSQL.ORM.RequireSelector
-  other-extensions: DefaultSignatures
-                  , DeriveGeneric
-                  , FlexibleContexts
+  other-extensions: FlexibleContexts
                   , FlexibleInstances
                   , OverloadedStrings
                   , TypeOperators
+               -- , DefaultSignatures, DeriveGeneric

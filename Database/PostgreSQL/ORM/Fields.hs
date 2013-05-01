@@ -106,10 +106,10 @@ createTable a = createTableWithTypes (createTableTypes $ modelToInfo a) a
 
 
 data Bar = Bar {
-  barKey :: !DBKey
-  , barNone :: !Int32
-  , barString :: !String
-  , barParent :: !(Maybe (DBRef Bar))
+  bar_key :: !DBKey
+  , bar_none :: !Int32
+  , bar_string :: !String
+  , bar_parent :: !(Maybe (DBRef Bar))
   } deriving (Show, Generic)
                                     
 instance Model Bar
@@ -117,7 +117,13 @@ instance CreateTable Bar where
   createTableTypes _ = [("barString", "varchar(16)")]
 
 bar :: Bar
-bar = Bar (DBKey 4) 77 "hi" Nothing
+bar = Bar NullKey 77 "hi" Nothing
+
+mkc :: IO Connection
+mkc = connectPostgreSQL ""
+
+bar' :: Bar
+bar' = Bar NullKey 78 "bye" Nothing
 
 
 x :: Maybe Int32
