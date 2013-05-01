@@ -14,10 +14,15 @@ library
                , time
   ghc-options: -Wall
   exposed-modules: Database.PostgreSQL.ORM.Fields
+                 , Database.PostgreSQL.ORM.HasField
                  , Database.PostgreSQL.ORM.Model
                  , Database.PostgreSQL.ORM.RequireSelector
   other-extensions: FlexibleContexts
                   , FlexibleInstances
+                  , FunctionalDependencies
+                  , MultiParamTypeClasses
+                  , OverlappingInstances
                   , OverloadedStrings
                   , TypeOperators
+                  , UndecidableInstances
                -- , DefaultSignatures, DeriveGeneric
