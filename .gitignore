@@ -1,0 +1,6 @@
+*.hi
+*.o
+*_hsc.[ch]
+*~
+/dist
+/doc

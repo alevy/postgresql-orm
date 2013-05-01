@@ -1,0 +1,21 @@
+name: postgresql-orm
+version: 0.0
+cabal-version: >= 1.14
+build-type: Simple
+license: GPL
+author: Amit Levy and David Mazieres
+
+library
+  default-language: Haskell2010
+  build-depends: base < 6
+               , postgresql-simple
+  ghc-options: -Wall
+  exposed-modules: Database.PostgreSQL.ORM.Model
+                 , Database.PostgreSQL.ORM.TrustedTypes   
+                 , Database.PostgreSQL.ORM.PoisonNoSelector
+  other-extensions: DefaultSignatures
+                  , DeriveGeneric
+                  , FlexibleContexts
+                  , FlexibleInstances
+                  , OverloadedStrings
+                  , TypeOperators
