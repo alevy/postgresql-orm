@@ -6,6 +6,7 @@
 module Database.PostgreSQL.ORM.Relationships where
 
 import qualified Data.ByteString as S
+import Data.Maybe
 import GHC.Generics
 
 import Database.PostgreSQL.ORM.HasField
@@ -21,21 +22,22 @@ instance Show (RefDescriptor b r) where
   show rd = "RefDescriptor " ++ show (refDescColumn rd) ++ " ?"
 
 
-defaultRefDescriptor :: (Model b, Generic b, GHasField (Rep b) r TYes) =>
+defaultRefDescriptor :: (Model b, Generic b, GHasMaybeField (Rep b) r TYes) =>
                         RefDescriptor b r
 defaultRefDescriptor = rd
   where getTypes :: RefDescriptor b r -> (b, r)
         getTypes _ = (undefined, undefined)
         (b, r) = getTypes rd
         rd = RefDescriptor {
-            refDescColumn = modelColumns (modelToInfo b) !! getFieldPos b r
-          , refDescSelector = getFieldVal
+            refDescColumn = modelColumns (modelToInfo b) !!
+                            getMaybeFieldPos b r
+          , refDescSelector = fromJust . getMaybeFieldVal
           }
 
 class HasOne h b where
   hasOneDesc :: RefDescriptor b (DBURef h)
   default hasOneDesc :: (Model b, Generic b
-                        , GHasField (Rep b) (DBURef h) TYes) =>
+                        , GHasMaybeField (Rep b) (DBURef h) TYes) =>
                         RefDescriptor b (DBURef h)
   {-# INLINE hasOneDesc #-}
   hasOneDesc = defaultRefDescriptor
@@ -43,7 +45,7 @@ class HasOne h b where
 class HasMany h b where
   hasManyDesc :: RefDescriptor b (DBRef h)
   default hasManyDesc :: (Model b, Generic b
-                         , GHasField (Rep b) (DBRef h) TYes) =>
+                         , GHasMaybeField (Rep b) (DBRef h) TYes) =>
                          RefDescriptor b (DBRef h)
   {-# INLINE hasManyDesc #-}
   hasManyDesc = defaultRefDescriptor
@@ -59,3 +61,8 @@ data Bar = Bar {
   } deriving (Show, Generic)
                                     
 instance Model Bar
+
+bar :: Bar
+bar = Bar NullKey 77 "hi" Nothing
+
+instance HasOne Bar Bar

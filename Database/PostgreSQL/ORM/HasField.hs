@@ -11,7 +11,8 @@
 -- one field of the given type.  Only works for types with a single
 -- constructor.
 module Database.PostgreSQL.ORM.HasField
-       (GHasField, TYes, getFieldPos, getFieldVal) where
+       (TYes, GHasField, getFieldPos, getFieldVal
+       , GHasMaybeField, getMaybeFieldPos, getMaybeFieldVal) where
 
 import GHC.Generics
 
@@ -22,6 +23,7 @@ instance TypeGCast f f where
 
 newtype TYes a = TYes { fromTYes :: a } deriving (Show)
 data TNo a = TNo deriving (Show)
+
 
 class GJustOne a b c | a b -> c where
   gJustOne :: a p -> b p -> c p
@@ -72,3 +74,45 @@ getFieldPos a f = gFieldCount (from a) f - 1
 getFieldVal :: (Generic a, GHasField (Rep a) f TYes) => a -> f
 {-# INLINE getFieldVal #-}
 getFieldVal a = fromTYes $ gGetField (from a)
+
+
+class GHasMaybeField t f g | t f -> g where
+  gGetMaybeField :: t p -> g (Maybe f)
+  gMaybeFieldCount :: t p -> f -> Int
+instance GHasMaybeField (K1 i c) c TYes where
+  {-# INLINE gGetMaybeField #-}
+  gGetMaybeField (K1 c) = TYes (Just c)
+  gMaybeFieldCount _ _ = 1
+instance GHasMaybeField (K1 i (Maybe c)) c TYes where
+  {-# INLINE gGetMaybeField #-}
+  gGetMaybeField (K1 mc) = TYes mc
+  gMaybeFieldCount _ _ = 1
+instance (TypeGCast TNo g) => GHasMaybeField (K1 i c) c' g where
+  gGetMaybeField (K1 _) = typeGCast TNo
+  gMaybeFieldCount _ _ = 1
+instance (GHasMaybeField a f ga, GHasMaybeField b f gb, GJustOne ga gb g) =>
+    GHasMaybeField (a :*: b) f g where
+      {-# INLINE gGetMaybeField #-}
+      gGetMaybeField (a :*: b) = gJustOne (gGetMaybeField a) (gGetMaybeField b)
+      gMaybeFieldCount ~(a :*: b) f =
+        gPruneRight (force f $ gGetMaybeField a) (force f $ gGetMaybeField b)
+        (gMaybeFieldCount a f) (gMaybeFieldCount b f)
+        where force :: f -> c (Maybe f) -> c (Maybe f)
+              force _ = id
+instance (GHasMaybeField x f g) => GHasMaybeField (M1 i c x) f g where
+  {-# INLINE gGetMaybeField #-}
+  gGetMaybeField (M1 xp) = gGetMaybeField xp
+  gMaybeFieldCount ~(M1 xp) f = gMaybeFieldCount xp f
+
+-- | Similar to 'getMaybeFieldPos', but looks for a field that is
+-- either of type @f@ or of type @Maybe f@.  (Only one field may have
+-- either of those two types.)
+getMaybeFieldPos :: (Generic a, GHasMaybeField (Rep a) f TYes) => a -> f -> Int
+getMaybeFieldPos a f = gMaybeFieldCount (from a) f - 1
+
+-- | Similar to 'getFieldVal', but looks for a field that is either of
+-- type @f@ or of type @Maybe f@.  In the former case, the value is
+-- wrapped with 'Just', so that the return type is always @Maybe f@.
+getMaybeFieldVal :: (Generic a, GHasMaybeField (Rep a) f TYes) => a -> Maybe f
+{-# INLINE getMaybeFieldVal #-}
+getMaybeFieldVal a = fromTYes $ gGetMaybeField (from a)
