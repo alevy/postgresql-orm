@@ -6,10 +6,15 @@ module Database.PostgreSQL.ORM.Model (
     , Model(..), ModelInfo(..)
     , LookupRow(..), UpdateRow(..), InsertRow(..)
     , DBRef(..), mkDBRef, dbRefToInfo
+      -- * Database operations
+    , findKey, findRef, save
+      -- * Low-level functions providing piecemeal access to defaults
     , defaultModelInfo
     , defaultModelInfoName, defaultModelColumns, defaultModelGetPrimaryKey
     , defaultModelRead, defaultModelWrite
     , defaultModelLookupQuery, defaultModelUpdateQuery, defaultModelInsertQuery
+      -- * Low-level functions for generic FromRow/ToRow
+    , GFromRow(..), defaultFromRow, GToRow(..), defaultToRow
     ) where
 
 import Control.Applicative
@@ -30,8 +35,15 @@ import GHC.Generics
 
 import Database.PostgreSQL.ORM.RequireSelector
 
+-- | The value of keys in the database.
 type DBKeyType = Int64
 
+-- | A datatype representing the primary key of a row in the model.
+-- This should be @NullKey@ for a model that is being constructed and
+-- has not yet been inserted into the database, and @DBKey@ for a
+-- model stored in the database.  A @DBKey@ should be the first field
+-- in every 'Model' data structure (otherwise the default 'Model'
+-- instance will intentionally cause a compilation error).
 data DBKey = DBKey !DBKeyType | NullKey deriving (Typeable)
 
 instance Eq DBKey where
@@ -61,6 +73,7 @@ isNullKey NullKey = True
 isNullKey _       = False
 
 
+-- | Every 'Model' has a @ModelInfo@ structure associated with it.
 data ModelInfo a = Model {
     modelInfoName :: !S.ByteString
     -- ^ The name of the database table corresponding to this model.
@@ -77,11 +90,21 @@ data ModelInfo a = Model {
   , modelRead :: !(RowParser a)
     -- ^ Parse a database row corresponding to the model.
   , modelWrite :: !(a -> [Action])
-    -- ^ Format all fields but the primary key for writing the model
-    -- to the database.
+    -- ^ Format all fields except the primary key for writing the
+    -- model to the database.
   , modelLookupQuery :: !Query
+    -- ^ A query template for looking up a model by its primary key.
+    -- Should expect a single query parameter, namely the 'DBKey'
+    -- being looked up.
   , modelUpdateQuery :: !Query
+    -- ^ A query template for updating an existing 'Model' in the
+    -- database.  Expects as query parameters every column of the
+    -- model /except/ the primary key, followed by the primary key.
+    -- (The primary key is not written to the database, just used to
+    -- select the row to change.)
   , modelInsertQuery :: !Query
+    -- ^ A query template for inserting a new 'Model' in the database.
+    -- The query parameters are all columns /except/ the primary key.
   }
 
 instance Show (ModelInfo a) where
@@ -115,8 +138,7 @@ defaultModelColumns = gColumns . from
 
 -- | This class extracts the first field in a data structure when the
 -- field is of type 'DBKey'.  If you get a compilation error because
--- of this class, then move the 'DBKey' first in your data structure
--- or redefine 'primaryKeyIndex'.
+-- of this class, then move the 'DBKey' first in your data structure.
 class GPrimaryKey0 f where
   gPrimaryKey0 :: f p -> DBKey
 instance (Selector c, RequireSelector c) =>
@@ -204,7 +226,7 @@ defaultModelUpdateQuery :: S.ByteString -- ^ Name of database table
 defaultModelUpdateQuery t cs pki = Query $ S.concat [
     "update ", q t, " set "
     , S.intercalate ", " (map (\c -> q c <> " = ?") $ deleteAt pki cs)
-    , " where ", cs !! pki, " = ?"
+    , " where ", q (cs !! pki), " = ?"
   ]
 
 defaultModelInsertQuery :: S.ByteString -- ^ Name of database table
@@ -240,6 +262,30 @@ defaultModelInfo = m
         cols = defaultModelColumns a
 
 
+-- | Class of data types representing a database table.  Provides a
+-- reasonable default implementation for types that are members of the
+-- 'Generic' class (using GHC's @DeriveGeneric@ extension), provided
+-- two conditions hold:
+--
+--   1. The data type must be defined using record selector syntax.
+--
+--   2. The very first field of the data type must be a 'DBKey' to
+--      represent the primary key.  (If the 'DBKey' does not appear
+--      first in your source code, right after the opening brace, the
+--      default will intentionally fail to compile.)
+--
+-- All information is encapsulated in a single data type, to make it
+-- relatively simple to have alternate patterns.  E.g., instead of:
+--
+-- >   instance Model MyType
+--
+-- You can use:
+--
+-- >   instance Model MyType where modelInfo = someOtherPattern
+--
+-- Provided you defined your own @someOtherPattern@ function (possibly
+-- using some of the low-level defaults in this file).
+--
 class Model a where
   modelInfo :: ModelInfo a
   default modelInfo :: (Generic a, GToRow (Rep a), GFromRow (Rep a)
@@ -260,6 +306,9 @@ primaryKey :: (Model a) => a -> DBKey
 {-# INLINE primaryKey #-}
 primaryKey a = modelGetPrimaryKey modelInfo a
 
+-- | A Haskell data type representing a foreign key reference in in
+-- the database.  This data type only makes sense to use when type @a@
+-- is also 'Model'.
 newtype DBRef a = DBRef DBKeyType deriving (Eq, Ord, Typeable)
 
 mkDBRef :: (Model a) => a -> DBRef a
@@ -280,20 +329,55 @@ instance FromField (DBRef a) where fromField f bs = DBRef <$> fromField f bs
 instance ToField (DBRef a) where toField (DBRef k) = toField k
 
 
+-- | A newtype wrapper in the 'FromRow' class, permitting every model
+-- to used as the result of a database query.
 newtype LookupRow a = LookupRow { lookupRow :: a } deriving (Show, Typeable)
 instance (Model a) => FromRow (LookupRow a) where
   fromRow = LookupRow <$> modelRead modelInfo
 
-newtype UpdateRow a = UpdateRow a deriving (Show, Typeable)
-instance (Model a) => ToRow (UpdateRow a) where
-  toRow (UpdateRow a) = toRow $ InsertRow a :. Only (primaryKey a)
-
+-- | A newtype wrapper in the 'ToRow' class, which marshalls every
+-- field except the primary key.  For use with 'modelInsertQuery'.
 newtype InsertRow a = InsertRow a deriving (Show, Typeable)
 instance (Model a) => ToRow (InsertRow a) where
   toRow (InsertRow a) = modelWrite modelInfo a
 
+-- | A newtype wrapper in the 'ToRow' class, which marshalls every
+-- field except the primary key, followed by the primary key.  For use
+-- with 'modelUpdateQuery'.
+newtype UpdateRow a = UpdateRow a deriving (Show, Typeable)
+instance (Model a) => ToRow (UpdateRow a) where
+  toRow (UpdateRow a) = toRow $ InsertRow a :. Only (primaryKey a)
 
 
+findKey :: (Model r) => Connection -> DBKey -> IO (Maybe r)
+findKey _ NullKey = error "findKey: NullKey"
+findKey c k = action
+  where getInfo :: (Model r) => IO (Maybe r) -> ModelInfo r
+        getInfo _ = modelInfo
+        m = getInfo action
+        action = do rs <- query c (modelLookupQuery m) (Only k)
+                    case rs of [r] -> return $ Just $ lookupRow $ r
+                               _   -> return Nothing
+
+findRef :: (Model r) => Connection -> DBRef r -> IO (Maybe r)
+findRef c (DBRef k) = findKey c (DBKey k)
+
+-- | Write a 'Model' to the database.  If the primary key is
+-- 'NullKey', the item is written with an @INSERT@ query, read back
+-- from the database, and returned with its primary key filled in.  If
+-- the primary key is not 'NullKey', then the 'Model' is writen with
+-- an @UPDATE@ query and returned as-is.
+save :: (Model r) => Connection -> r -> IO r
+save c r | NullKey <- primaryKey r = do
+               rs <- query c (modelInsertQuery m) (InsertRow r)
+               case rs of [r'] -> return $ lookupRow r'
+                          _    -> fail "save: database did not return row"
+         | otherwise = do
+               n <- execute c (modelUpdateQuery m) (UpdateRow r)
+               case n of 1 -> return r
+                         _ -> fail $ "save: database updated " ++ show n
+                                     ++ " records"
+  where m = modelToInfo r
 
 {-
 data Foo = Foo {
