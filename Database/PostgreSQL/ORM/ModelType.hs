@@ -57,18 +57,30 @@ isNullKey NullKey = True
 isNullKey _       = False
 
 
-data Model a = Model {
+data ModelInfo a = Model {
     modelName :: !S.ByteString
+    -- ^ The name of the database table corresponding to this model.
+    -- The default is the same as the type name.
   , modelColumns :: ![S.ByteString]
+    -- ^ The name of columns in the database table that corresponds to
+    -- this model.  The column names should appear in the order that the
+    -- data fields occur in the haskell data type @a@ (or at least the
+    -- order in which 'modelRead' parses them).  The default is to use
+    -- the Haskell field names for @a@.  This default will fail to
+    -- compile if @a@ is not defined using record syntax.
   , modelGetPrimaryKey :: !(a -> DBKey)
+    -- ^ Return the primary key of a particular model instance.
   , modelRead :: !(RowParser a)
+    -- ^ Parse a database row corresponding to the model.
   , modelWrite :: !(a -> [Action])
+    -- ^ Format all fields but the primary key for writing the model
+    -- to the database.
   , modelLookupQuery :: !Query
   , modelUpdateQuery :: !Query
   , modelInsertQuery :: !Query
   }
 
-instance Show (Model a) where
+instance Show (ModelInfo a) where
   show a = intercalate " " ["Model", show $ modelName a
                            , show $ modelColumns a, "???"
                            , show $ fromQuery $ modelLookupQuery a
@@ -113,7 +125,7 @@ instance (GPrimaryKey0 f) => GPrimaryKey0 (M1 C c f) where
 instance (GPrimaryKey0 f) => GPrimaryKey0 (M1 D c f) where
   gPrimaryKey0 (M1 fp) = gPrimaryKey0 fp
 
--- | Extract the primary key of type 'DBKey' from a 'Model' when the
+-- | Extract the primary key of type 'DBKey' from a model when the
 -- 'DBKey' is the first element of the data structure.  Fails to
 -- compile if the first field is not of type 'DBKey'.
 defaultModelGetPrimaryKey :: (Generic a, GPrimaryKey0 (Rep a)) => a -> DBKey
@@ -201,8 +213,51 @@ defaultModelInsertQuery t cs0 pki = Query $ S.concat $ [
   , ") returning ", fmtCols cs0
   ]
   where cs1 = deleteAt pki cs0
-                                   
 
+
+defaultModel :: (Generic a, GToRow (Rep a), GFromRow (Rep a)
+                , GPrimaryKey0 (Rep a), GColumns (Rep a)
+                , GDatatypeName (Rep a)) => ModelInfo a
+defaultModel = m
+  where m = Model { modelName = name
+                  , modelColumns = cols
+                  , modelGetPrimaryKey = defaultModelGetPrimaryKey
+                  , modelRead = defaultModelRead
+                  , modelWrite = defaultModelWrite pki
+                  , modelLookupQuery = defaultModelLookupQuery name cols pki
+                  , modelInsertQuery = defaultModelInsertQuery name cols pki
+                  , modelUpdateQuery = defaultModelUpdateQuery name cols pki
+                  }
+        unModel :: ModelInfo a -> a
+        unModel _ = undefined
+        a = unModel m
+        name = defaultModelName a
+        pki = 0
+        cols = defaultModelColumns a
+
+
+class Model a where
+  modelInfo :: ModelInfo a
+  default modelInfo :: (Generic a, GToRow (Rep a), GFromRow (Rep a)
+                       , GPrimaryKey0 (Rep a), GColumns (Rep a)
+                       , GDatatypeName (Rep a)) => ModelInfo a
+  {-# INLINE modelInfo #-}
+  modelInfo = defaultModel
+
+
+
+
+
+data Foo = Foo {
+    fooKey :: !DBKey
+  , fooNone :: !Int32
+  , fooString :: !String
+  } deriving (Show, Generic)
+instance Model Foo
+
+foo :: Foo
+foo = Foo (DBKey 5) 3 "Hello"
+                                    
 
 {-
   
