@@ -1,4 +1,4 @@
-{-# LANGUAGE DeriveDataTypeable, DeriveGeneric, DefaultSignatures,
+{-# LANGUAGE DeriveDataTypeable, DefaultSignatures,
     FlexibleContexts, FlexibleInstances, TypeOperators, OverloadedStrings #-}
 
 module Database.PostgreSQL.ORM.Model (
@@ -420,17 +420,3 @@ save c r | NullKey <- primaryKey r = do
                          _ -> fail $ "save: database updated " ++ show n
                                      ++ " records"
   where m = modelToInfo r
-
-{-
-data Foo = Foo {
-    fooKey :: !DBKey
-  , fooNone :: !Int32
-  , fooString :: !String
-  , fooParent :: !(Maybe (DBRef Foo))
-  } deriving (Show, Generic)
-                                    
-instance Model Foo
-
-foo :: Foo
-foo = Foo (DBKey 4) 77 "hi" Nothing
--}

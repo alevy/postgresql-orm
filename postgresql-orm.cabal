@@ -16,6 +16,7 @@ library
   exposed-modules: Database.PostgreSQL.ORM.Fields
                  , Database.PostgreSQL.ORM.HasField
                  , Database.PostgreSQL.ORM.Model
+                 , Database.PostgreSQL.ORM.Relationships
                  , Database.PostgreSQL.ORM.RequireSelector
   other-extensions: FlexibleContexts
                   , FlexibleInstances

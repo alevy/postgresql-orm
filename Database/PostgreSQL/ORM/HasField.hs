@@ -28,9 +28,11 @@ class GJustOne a b c | a b -> c where
   gPruneRight :: a p -> b p -> Int -> Int -> Int
   gPruneRight _ _ a b = a + b
 instance GJustOne TYes TNo TYes where
+  {-# INLINE gJustOne #-}
   gJustOne j _ = j
   gPruneRight _ _ a _ = a
 instance GJustOne TNo TYes TYes where
+  {-# INLINE gJustOne #-}
   gJustOne _ j = j
 instance GJustOne TNo TNo TNo where
   gJustOne _ _ = TNo
@@ -39,6 +41,7 @@ class GHasField t f g | t f -> g where
   gGetField :: t p -> g f
   gFieldCount :: t p -> f -> Int
 instance GHasField (K1 i c) c TYes where
+  {-# INLINE gGetField #-}
   gGetField (K1 c) = TYes c
   gFieldCount _ _ = 1
 instance (TypeGCast TNo g) => GHasField (K1 i c) c' g where
@@ -46,6 +49,7 @@ instance (TypeGCast TNo g) => GHasField (K1 i c) c' g where
   gFieldCount _ _ = 1
 instance (GHasField a f ga, GHasField b f gb, GJustOne ga gb g) =>
          GHasField (a :*: b) f g where
+           {-# INLINE gGetField #-}
            gGetField (a :*: b) = gJustOne (gGetField a) (gGetField b)
            gFieldCount ~(a :*: b) f =
              gPruneRight (force f $ gGetField a) (force f $ gGetField b)
@@ -53,6 +57,7 @@ instance (GHasField a f ga, GHasField b f gb, GJustOne ga gb g) =>
              where force :: f -> c f -> c f
                    force _ = id
 instance (GHasField x f g) => GHasField (M1 i c x) f g where
+  {-# INLINE gGetField #-}
   gGetField (M1 xp) = gGetField xp
   gFieldCount ~(M1 xp) f = gFieldCount xp f
 
@@ -65,4 +70,5 @@ getFieldPos a f = gFieldCount (from a) f - 1
 -- | Extract the single field of a particular type from a 'Generic'
 -- data structure with exactly one constructor.
 getFieldVal :: (Generic a, GHasField (Rep a) f TYes) => a -> f
+{-# INLINE getFieldVal #-}
 getFieldVal a = fromTYes $ gGetField (from a)
