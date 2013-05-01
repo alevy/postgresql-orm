@@ -70,6 +70,13 @@ instance (Model a) => SqlType (DBRef a) where
               " references ", quoteIdent (modelInfoName t) , "("
               , quoteIdent (modelColumns t !! modelPrimaryColumn t), ")" ]
 
+instance (Model a) => SqlType (DBURef a) where
+  sqlBaseType r@(DBURef k) = sqlBaseType k <> ref
+    where t = dbRefToInfo r
+          ref = S.concat [
+              " unique references ", quoteIdent (modelInfoName t) , "("
+              , quoteIdent (modelColumns t !! modelPrimaryColumn t), ")" ]
+
 class GDefTypes f where
   gDefTypes :: f p -> [S.ByteString]
 instance (SqlType c) => GDefTypes (K1 i c) where
@@ -109,7 +116,7 @@ data Bar = Bar {
   bar_key :: !DBKey
   , bar_none :: !Int32
   , bar_string :: !String
-  , bar_parent :: !(Maybe (DBRef Bar))
+  , bar_parent :: !(Maybe (DBURef Bar))
   } deriving (Show, Generic)
                                     
 instance Model Bar
