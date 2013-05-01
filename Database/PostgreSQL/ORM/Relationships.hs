@@ -20,26 +20,26 @@ import Database.PostgreSQL.ORM.Model
 
 import Data.Int
 
-data RefDescriptor r child parent = RefDescriptor {
-    refDescRefColumn :: !Int
-  , refDescSelector :: !(child -> r parent)
-  , refDescQuery :: !Query
+data DBRefInfo r child parent = DBRefInfo {
+    dbrefColumn :: !Int
+  , dbrefSelector :: !(child -> r parent)
+  , dbrefQuery :: !Query
   }
-instance (Model child) => Show (RefDescriptor r child parent) where
-  show rd = "RefDescriptor " ++ show c ++ " " ++
+instance (Model child) => Show (DBRefInfo r child parent) where
+  show rd = "DBRefInfo " ++ show c ++ " " ++
             S8.unpack (modelColumns mi !! c) ++ " " ++
-            show (refDescQuery rd)
-    where c = refDescRefColumn rd
-          getmi :: (Model c) => RefDescriptor r c parent -> ModelInfo c
+            show (dbrefQuery rd)
+    where c = dbrefColumn rd
+          getmi :: (Model c) => DBRefInfo r c parent -> ModelInfo c
           getmi _ = modelInfo
           mi = getmi rd
 
 
-defaultRefDescriptor :: (Model child, Generic child
-                        , GHasMaybeField (Rep child) (r parent) TYes) =>
-                        RefDescriptor r child parent
-defaultRefDescriptor = rd
-  where getTypes :: RefDescriptor r child parent -> (child, r parent)
+defaultDBRefInfo :: (Model child, Generic child
+                    , GHasMaybeField (Rep child) (r parent) TYes) =>
+                    DBRefInfo r child parent
+defaultDBRefInfo = rd
+  where getTypes :: DBRefInfo r child parent -> (child, r parent)
         getTypes _ = (undefined, undefined)
         (c, rh) = getTypes rd
         cols = modelColumns $ modelToInfo c
@@ -49,50 +49,70 @@ defaultRefDescriptor = rd
           , S.intercalate ", " (map quoteIdent cols)
           , " from ", quoteIdent (modelName c), " where "
           , quoteIdent (cols !! colno), " = ?"]
-        rd = RefDescriptor {
-            refDescRefColumn = colno
-          , refDescSelector = fromJust . getMaybeFieldVal
-          , refDescQuery = Query qstr
+        rd = DBRefInfo {
+            dbrefColumn = colno
+          , dbrefSelector = fromJust . getMaybeFieldVal
+          , dbrefQuery = Query qstr
           }
 
 class (Model parent, Model child) => HasOne parent child where
-  hasOneDesc :: RefDescriptor DBURef child parent
-  default hasOneDesc :: (Model child, Generic child
+  hasOneInfo :: DBRefInfo DBURef child parent
+  default hasOneInfo :: (Model child, Generic child
                         , GHasMaybeField (Rep child) (DBURef parent) TYes) =>
-                        RefDescriptor DBURef child parent
-  {-# INLINE hasOneDesc #-}
-  hasOneDesc = defaultRefDescriptor
+                        DBRefInfo DBURef child parent
+  {-# INLINE hasOneInfo #-}
+  hasOneInfo = defaultDBRefInfo
 
 class (Model parent, Model child) => HasMany parent child where
-  hasManyDesc :: RefDescriptor DBRef child parent
-  default hasManyDesc :: (Model child, Generic child
+  hasManyInfo :: DBRefInfo DBRef child parent
+  default hasManyInfo :: (Model child, Generic child
                          , GHasMaybeField (Rep child) (DBRef parent) TYes) =>
-                         RefDescriptor DBRef child parent
-  {-# INLINE hasManyDesc #-}
-  hasManyDesc = defaultRefDescriptor
+                         DBRefInfo DBRef child parent
+  {-# INLINE hasManyInfo #-}
+  hasManyInfo = defaultDBRefInfo
 
 
 rdParentOf :: (IsDBRef r, Model parent) =>
-              RefDescriptor r child parent -> Connection -> child
+              DBRefInfo r child parent -> Connection -> child
               -> IO (Maybe parent)
-rdParentOf rd conn c = findRef conn $ refDescSelector rd c
+rdParentOf rd conn c = findRef conn $ dbrefSelector rd c
 
 rdChildrenOf :: (Model child, IsDBRef r, Model parent) =>
-                RefDescriptor r child parent -> Connection -> parent
+                DBRefInfo r child parent -> Connection -> parent
                 -> IO [child]
 rdChildrenOf rd conn p =
-  map lookupRow <$> query conn (refDescQuery rd) (Only $ primaryKey p)
+  map lookupRow <$> query conn (dbrefQuery rd) (Only $ primaryKey p)
 
 
 findOne :: (HasOne parent child) => Connection -> parent -> IO (Maybe child)
 findOne c p = do
-  rs <- rdChildrenOf hasOneDesc c p
+  rs <- rdChildrenOf hasOneInfo c p
   case rs of [r] -> return $ Just r
              _   -> return Nothing
 
 findMany :: (HasMany parent child) => Connection -> parent -> IO [child]
-findMany = rdChildrenOf hasManyDesc
+findMany = rdChildrenOf hasManyInfo
 
+
+data JoinInfo a b = JoinInfo {
+  joinQuery :: !Query
+  } deriving (Show)
+
+class (Model a, Model b) => Joins a b where
+  joinInfo :: JoinInfo a b
+
+jtJoinOf :: (Model a, Model b) => JoinInfo a b -> Connection -> a -> IO [b]
+jtJoinOf jt conn a = do
+  map lookupRow <$> query conn (joinQuery jt) (Only $ primaryKey a)
+
+findJoin :: (Joins a b) => Connection -> a -> IO [b]
+findJoin = jtJoinOf joinInfo
+
+
+{-
+select Post.*, User.* from Post, User, Comment where Comment.postId =
+	 Post.id and Comment.userId = User.id
+-}
 
 data Bar = Bar {
   bar_key :: !DBKey
