@@ -1,17 +1,21 @@
 {-# LANGUAGE DeriveDataTypeable, DeriveGeneric, DefaultSignatures,
     FlexibleContexts, FlexibleInstances, TypeOperators, OverloadedStrings #-}
 
-module Database.PostgreSQL.ORM.Model {-(
-    DBKeyType, DBKey(..), isNullKey, DBRef(..), mkDBRef, dbRefModel
-    , Row(..), NewRow(..), Model(..)
-  , defaultModelName, defaultModelColumns, defaultPrimaryColumn
-  , defaultPrimaryKey, defaultFromRow, defaultToRow)-} where
+module Database.PostgreSQL.ORM.Model (
+    DBKeyType, DBKey(..), isNullKey
+    , Model(..), ModelInfo(..)
+    , LookupRow(..), UpdateRow(..), InsertRow(..)
+    , DBRef(..), mkDBRef, dbRefToInfo
+    , defaultModelInfo
+    , defaultModelInfoName, defaultModelColumns, defaultModelGetPrimaryKey
+    , defaultModelRead, defaultModelWrite
+    , defaultModelLookupQuery, defaultModelUpdateQuery, defaultModelInsertQuery
+    ) where
 
 import Control.Applicative
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Char8 as S8
 import Data.Int
-import Data.Maybe
 import Data.Monoid
 import Data.List
 import Data.Typeable
@@ -58,7 +62,7 @@ isNullKey _       = False
 
 
 data ModelInfo a = Model {
-    modelName :: !S.ByteString
+    modelInfoName :: !S.ByteString
     -- ^ The name of the database table corresponding to this model.
     -- The default is the same as the type name.
   , modelColumns :: ![S.ByteString]
@@ -81,7 +85,7 @@ data ModelInfo a = Model {
   }
 
 instance Show (ModelInfo a) where
-  show a = intercalate " " ["Model", show $ modelName a
+  show a = intercalate " " ["Model", show $ modelInfoName a
                            , show $ modelColumns a, "???"
                            , show $ fromQuery $ modelLookupQuery a
                            , show $ fromQuery $ modelInsertQuery a
@@ -91,8 +95,8 @@ class GDatatypeName f where
   gDatatypeName :: f p -> S.ByteString
 instance (Datatype c) => GDatatypeName (M1 i c f) where 
   gDatatypeName a = fromString $ datatypeName a
-defaultModelName :: (Generic a, GDatatypeName (Rep a)) => a -> S.ByteString
-defaultModelName = gDatatypeName . from
+defaultModelInfoName :: (Generic a, GDatatypeName (Rep a)) => a -> S.ByteString
+defaultModelInfoName = gDatatypeName . from
 
 class GColumns f where
   gColumns :: f p -> [S.ByteString]
@@ -163,7 +167,7 @@ defaultToRow :: (Generic a, GToRow (Rep a)) => a -> [Action]
 defaultToRow = gToRow . from
 
 deleteAt :: Int -> [a] -> [a]
-deleteAt 0 (h:t) = t
+deleteAt 0 (_:t) = t
 deleteAt n (h:t) = h:deleteAt (n-1) t
 deleteAt _ _     = []
 
@@ -215,23 +219,23 @@ defaultModelInsertQuery t cs0 pki = Query $ S.concat $ [
   where cs1 = deleteAt pki cs0
 
 
-defaultModel :: (Generic a, GToRow (Rep a), GFromRow (Rep a)
-                , GPrimaryKey0 (Rep a), GColumns (Rep a)
-                , GDatatypeName (Rep a)) => ModelInfo a
-defaultModel = m
-  where m = Model { modelName = name
+defaultModelInfo :: (Generic a, GToRow (Rep a), GFromRow (Rep a)
+                    , GPrimaryKey0 (Rep a), GColumns (Rep a)
+                    , GDatatypeName (Rep a)) => ModelInfo a
+defaultModelInfo = m
+  where m = Model { modelInfoName = mname
                   , modelColumns = cols
                   , modelGetPrimaryKey = defaultModelGetPrimaryKey
                   , modelRead = defaultModelRead
                   , modelWrite = defaultModelWrite pki
-                  , modelLookupQuery = defaultModelLookupQuery name cols pki
-                  , modelInsertQuery = defaultModelInsertQuery name cols pki
-                  , modelUpdateQuery = defaultModelUpdateQuery name cols pki
+                  , modelLookupQuery = defaultModelLookupQuery mname cols pki
+                  , modelInsertQuery = defaultModelInsertQuery mname cols pki
+                  , modelUpdateQuery = defaultModelUpdateQuery mname cols pki
                   }
         unModel :: ModelInfo a -> a
         unModel _ = undefined
         a = unModel m
-        name = defaultModelName a
+        mname = defaultModelInfoName a
         pki = 0
         cols = defaultModelColumns a
 
@@ -242,119 +246,56 @@ class Model a where
                        , GPrimaryKey0 (Rep a), GColumns (Rep a)
                        , GDatatypeName (Rep a)) => ModelInfo a
   {-# INLINE modelInfo #-}
-  modelInfo = defaultModel
+  modelInfo = defaultModelInfo
 
+modelToInfo :: (Model a) => a -> ModelInfo a
+{-# INLINE modelToInfo #-}
+modelToInfo _ = modelInfo
 
-
-
-
-data Foo = Foo {
-    fooKey :: !DBKey
-  , fooNone :: !Int32
-  , fooString :: !String
-  } deriving (Show, Generic)
-instance Model Foo
-
-foo :: Foo
-foo = Foo (DBKey 5) 3 "Hello"
-                                    
-
-{-
-  
-class Model a where
-  -- | The name of the database table corresponding to this model.
-  -- The default is the same as the type name.
-  modelName :: a -> S.ByteString
-  default modelName :: (Generic a, GModelName (Rep a)) => a -> S.ByteString
-  modelName = defaultModelName
-
-  -- | The name of columns in the database table that corresponds to
-  -- this model.  The column names should appear in the order that the
-  -- data fields occur in the haskell data type @a@.  The default is
-  -- to use the Haskell field names for @a@.  This default will fail
-  -- to compile if @a@ is not defined using record syntax.
-  modelColumns :: a -> [S.ByteString]
-  default modelColumns :: (Generic a, GColumns (Rep a)) => a -> [S.ByteString]
-  modelColumns = defaultModelColumns
-
-  -- | A function for extracting the primary key from from a model, as
-  -- well as the index of that primary key within 'modelColumns'.  No
-  -- checking is performed to ensure that the column index is correct.
-  primaryKeyAndIndex :: a -> (a -> DBKey, Int)
-  default primaryKeyAndIndex :: (Generic a, GPrimaryKey (Rep a)) =>
-                                a -> (a -> DBKey, Int)
-  primaryKeyAndIndex _ = defaultPrimaryKeyAndIndex
-
-  modelRead :: RowParser a
-  default modelRead :: (Generic a, GFromRow (Rep a)) => RowParser a
-  modelRead = defaultFromRow
-
-  modelWrite :: a -> [Action]
-  default modelWrite :: (Generic a, GToRow (Rep a)) => a -> [Action]
-  modelWrite a = deleteAt (primaryKeyIndex a) $ defaultToRow a
-
-  lookupQuery :: a -> Query
-  lookupQuery a0 = Query $ "select " <> fmtCols (modelColumns a) <>
-                   " from " <> modelName a <>
-                   " where " <> q (primaryColumn a) <> " = ?"
-    where a = undefined `asTypeOf` a0
-
-  insertQuery :: a -> Query
-  insertQuery a0 = Query $ "insert into " <> modelName a <> " " <>
-                   fmtCols cols <> " values " <>
-                   fmtCols (map (const "?") cols) <>
-                   " returning " <> q (primaryColumn a)
-    where a = undefined `asTypeOf` a0
-          cols = deleteAt (primaryKeyIndex a) (modelColumns a)
-
-  updateQuery :: a -> Query
-  updateQuery a0 = Query $ "update " <> modelName a <> " set " <>
-                   S.intercalate ", " (map (\c -> q c <> " = ?") cols) <>
-                   " where " <> primaryColumn a <> " = ?"
-    where a = undefined `asTypeOf` a0
-          cols = deleteAt (primaryKeyIndex a) (modelColumns a)
-
-  -- | A list of column names that should not be created with the
-  -- default type.
-  columnTypes :: a -> [(S.ByteString, S.ByteString)]
-  columnTypes _ = []
+modelName :: (Model a) => a -> S.ByteString
+{-# INLINE modelName #-}
+modelName = modelInfoName . modelToInfo
 
 primaryKey :: (Model a) => a -> DBKey
-primaryKey a = fst (primaryKeyAndIndex a) a
-
-primaryKeyIndex :: (Model a) => a -> Int
-primaryKeyIndex a = snd $ primaryKeyAndIndex a
-
-primaryColumn :: (Model a) => a -> S.ByteString
-primaryColumn a = modelColumns a !! primaryKeyIndex a
-
-newtype ReadRow a = ReadRow { readRow :: a } deriving (Show, Typeable)
-instance (Model a) => FromRow (ReadRow a) where
-  fromRow = ReadRow <$> modelRead
-
-newtype WriteRow a = WriteRow a deriving (Show, Typeable)
-instance (Model a) => ToRow (WriteRow a) where
-  toRow (WriteRow a) = modelWrite a
+{-# INLINE primaryKey #-}
+primaryKey a = modelGetPrimaryKey modelInfo a
 
 newtype DBRef a = DBRef DBKeyType deriving (Eq, Ord, Typeable)
 
 mkDBRef :: (Model a) => a -> DBRef a
 mkDBRef a
   | (DBKey k) <- primaryKey a = DBRef k
-  | otherwise = error $ "mkDBRef (" ++ S8.unpack (modelName a) ++ "): NullKey"
+  | otherwise = error $ "mkDBRef " ++ S8.unpack (modelName a) ++ ": NullKey"
 
-dbRefModel :: DBRef a -> a
-dbRefModel _ = error "dbRefModel"
+dbRefToInfo :: (Model a) => DBRef a -> ModelInfo a
+{-# INLINE dbRefToInfo #-}
+dbRefToInfo _ = modelInfo
 
 instance (Model a) => Show (DBRef a) where
   showsPrec n r@(DBRef k) = showParen (n > 10) $
-    ("DBRef{" ++ ) . (S8.unpack (modelName $ dbRefModel r) ++) . ("} " ++)
-    . showsPrec 11 k
+    ("DBRef{" ++ ) . (mname ++) . ("} " ++) . showsPrec 11 k
+    where mname = S8.unpack $ modelInfoName $ dbRefToInfo r
 
 instance FromField (DBRef a) where fromField f bs = DBRef <$> fromField f bs
 instance ToField (DBRef a) where toField (DBRef k) = toField k
 
 
+newtype LookupRow a = LookupRow { lookupRow :: a } deriving (Show, Typeable)
+instance (Model a) => FromRow (LookupRow a) where
+  fromRow = LookupRow <$> modelRead modelInfo
+
+newtype UpdateRow a = UpdateRow a deriving (Show, Typeable)
+instance (Model a) => ToRow (UpdateRow a) where
+  toRow (UpdateRow a) = toRow $ InsertRow a :. Only (primaryKey a)
+
+newtype InsertRow a = InsertRow a deriving (Show, Typeable)
+instance (Model a) => ToRow (InsertRow a) where
+  toRow (InsertRow a) = modelWrite modelInfo a
+
+
+
+
+{-
 data Foo = Foo {
     fooKey :: !DBKey
   , fooNone :: !Int32
