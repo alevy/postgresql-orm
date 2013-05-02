@@ -10,6 +10,7 @@ module Database.PostgreSQL.ORM.Relationships where
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Char8 as S8
 import Data.Functor
+import Data.List
 import Data.Maybe
 import Database.PostgreSQL.Simple
 import Database.PostgreSQL.Simple.Types
@@ -94,25 +95,42 @@ findMany :: (HasMany parent child) => Connection -> parent -> IO [child]
 findMany = rdChildrenOf hasManyInfo
 
 
-data JoinTable a b = JoinTable {
-    ref_a :: !(DBRef a)
-  , ref_b :: !(DBRef b)
-  } deriving (Show, Eq)
-
-{-
-joinTableModelInfo :: (Model a, Model b) => ModelInfo (JoinTable a b)
-joinTableModelInfo = mi
-  where getmis :: (Model a, Model b) =>
-                  ModelInfo (JoinTable a b) -> (ModelInfo a, ModelInfo b)
-        getmis _ = (modelInfo, modelInfo)
-        (mia, mib) = getmis mi
-        mi = undefined
--}
-
-
 data JoinInfo a b = JoinInfo {
   joinQuery :: !Query
   } deriving (Show)
+
+data JoinTableInfo a b = JoinTableInfo { jtInfoName :: !S.ByteString
+                                       , jtColA :: !S.ByteString
+                                       , jtColB :: !S.ByteString
+                                       , jtKeyA :: !S.ByteString
+                                       , jtKeyB :: !S.ByteString
+                                       } deriving (Show)
+
+flipJoinTableInfo :: JoinTableInfo a b -> JoinTableInfo b a
+flipJoinTableInfo jt = JoinTableInfo { jtInfoName = jtInfoName jt
+                                     , jtColA = jtColB jt
+                                     , jtColB = jtColA jt
+                                     , jtKeyA = jtKeyB jt
+                                     , jtKeyB = jtKeyA jt
+                                     }
+
+defaultJoinTableInfo :: (Model a, Model b) => JoinTableInfo a b
+defaultJoinTableInfo = jti
+  where getmis :: (Model a, Model b) =>
+                  JoinTableInfo a b -> (ModelInfo a, ModelInfo b)
+        getmis _ = (modelInfo, modelInfo)
+        (a, b) = getmis jti
+        keya = modelColumns a !! modelPrimaryColumn a
+        keyb = modelColumns b !! modelPrimaryColumn b
+        jti = JoinTableInfo {
+            jtInfoName = S.intercalate "_" $
+                         sort [modelInfoName a, modelInfoName b]
+          , jtColA = S.concat [modelInfoName a, "_", keya]
+          , jtColB = S.concat [modelInfoName b, "_", keyb]
+          , jtKeyA = keya
+          , jtKeyB = keyb
+          }
+
 
 class (Model a, Model b) => Joins a b where
   joinInfo :: JoinInfo a b
@@ -134,6 +152,15 @@ select Post.*, User.* from Post, User, Comment where Comment.postId =
 <aalevy> so, "post_id" for example
 <aalevy> or, i guess "postId"
 -}
+
+data Foo = Foo {
+  foo_key :: !DBKey
+  , foo_int :: !Int32
+  , parent :: !(Maybe (DBRef Bar))
+  } deriving (Show, Generic)
+                                    
+instance Model Foo
+
 
 data Bar = Bar {
   bar_key :: !DBKey
