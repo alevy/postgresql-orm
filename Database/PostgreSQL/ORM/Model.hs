@@ -16,10 +16,11 @@ module Database.PostgreSQL.ORM.Model (
       -- * Low-level functions for generic FromRow/ToRow
     , GFromRow(..), defaultFromRow, GToRow(..), defaultToRow
       -- * Helper functions and miscellaneous internals
-    , quoteIdent, ShowRefType(..), NormalRef(..), UniqueRef(..)
+    , quoteIdent, gmodelToInfo, ShowRefType(..), NormalRef(..), UniqueRef(..)
     ) where
 
 import Control.Applicative
+import Control.Monad
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Char8 as S8
 import Data.Char
@@ -110,6 +111,9 @@ data ModelInfo a = Model {
   , modelInsertQuery :: !Query
     -- ^ A query template for inserting a new 'Model' in the database.
     -- The query parameters are all columns /except/ the primary key.
+  , modelDeleteQuery :: !Query
+    -- ^ A query template for deleting a 'Model' from the database.
+    -- The query paremeter is the primary key of the row to delete.
   }
 
 instance Show (ModelInfo a) where
@@ -251,6 +255,14 @@ defaultModelInsertQuery t cs0 pki = Query $ S.concat $ [
   ]
   where cs1 = deleteAt pki cs0
 
+defaultModelDeleteQuery :: S.ByteString -- ^ Name of database table
+                           -> [S.ByteString] -- ^ Names of columns
+                           -> Int            -- ^ Index of primary key field
+                           -> Query
+defaultModelDeleteQuery t cs pki = Query $ S.concat [
+  "delete from ", q t, " where ", q (cs !! pki), " = ?"
+  ]
+
 
 defaultModelInfo :: (Generic a, GToRow (Rep a), GFromRow (Rep a)
                     , GPrimaryKey0 (Rep a), GColumns (Rep a)
@@ -265,6 +277,7 @@ defaultModelInfo = m
                   , modelLookupQuery = defaultModelLookupQuery mname cols pki
                   , modelInsertQuery = defaultModelInsertQuery mname cols pki
                   , modelUpdateQuery = defaultModelUpdateQuery mname cols pki
+                  , modelDeleteQuery = defaultModelDeleteQuery mname cols pki
                   }
         unModel :: ModelInfo a -> a
         unModel _ = undefined
@@ -310,6 +323,10 @@ modelToInfo :: (Model a) => a -> ModelInfo a
 {-# INLINE modelToInfo #-}
 modelToInfo _ = modelInfo
 
+gmodelToInfo :: (Model a) => g a -> ModelInfo a
+{-# INLINE gmodelToInfo #-}
+gmodelToInfo _ = modelInfo
+
 modelName :: (Model a) => a -> S.ByteString
 {-# INLINE modelName #-}
 modelName = modelInfoName . modelToInfo
@@ -325,9 +342,7 @@ class ShowRefType rt where showRefType :: r rt t -> String
 instance (ShowRefType rt, Model t) => Show (GDBRef rt t) where
   showsPrec n r@(GDBRef k) = showParen (n > 10) $
     (showRefType r ++) . ("{" ++) . (mname ++) . ("} " ++) . showsPrec 11 k
-    where gmi :: (Model t) => x t -> ModelInfo t
-          gmi _ = modelInfo
-          mname = S8.unpack $ modelInfoName $ gmi r
+    where mname = S8.unpack $ modelInfoName $ gmodelToInfo r
 instance FromField (GDBRef rt t) where
   {-# INLINE fromField #-}
   fromField f bs = GDBRef <$> fromField f bs
@@ -405,3 +420,11 @@ save c r | NullKey <- primaryKey r = do
                          _ -> fail $ "save: database updated " ++ show n
                                      ++ " records"
   where m = modelToInfo r
+
+destroyByRef :: (Model a) => Connection -> GDBRef rt a -> IO ()
+destroyByRef c a =
+  void $ execute c (modelDeleteQuery $ gmodelToInfo a) (Only a)
+
+destroy :: (Model a) => Connection -> a -> IO ()
+destroy c a =
+  void $ execute c (modelDeleteQuery $ modelToInfo a) (Only $ primaryKey a)
