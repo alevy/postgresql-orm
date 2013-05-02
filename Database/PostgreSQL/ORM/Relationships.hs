@@ -114,22 +114,26 @@ findParent :: (HasParent child parent) =>
 findParent conn child = findRef conn (parentRef child)
 
 
-data JoinInfo a b = JoinInfo { joinQuery :: !Query } deriving (Show)
+data DummyForRetainingTypes a b = DummyForRetainingTypes
+instance Show (DummyForRetainingTypes a b) where show _ = ""
 
-data JoinTableNames a b = JoinTableNames {
+data JoinTableInfo a b = JoinTableInfo {
     jtTable :: !S.ByteString   -- ^ Name of the join table in the database
-  , jtColumnA :: !S.ByteString -- ^ Name of referencing column in join table
+  , jtColumnA :: !S.ByteString -- ^ Name of ref to A in join table
   , jtKeyA :: !S.ByteString    -- ^ Name of referenced key field in table A
   , jtColumnB :: !S.ByteString
   , jtKeyB :: !S.ByteString
+  , jtDummy :: DummyForRetainingTypes a b
+    -- ^ Ignore this field.  It exists so that one can modify other
+    -- fields of the @JoinTableInfo@ without changing the type
+    -- parameters @a@ and @b@.
   } deriving (Show)
 
-joinTableNameModels :: (Model a, Model b) =>
-                       JoinTableNames a b -> (ModelInfo a, ModelInfo b)
-joinTableNameModels _ = (modelInfo, modelInfo)
+data JoinQueryTemplate a b = JoinQueryTemplate !Query deriving (Show)
 
-joinTableQuery :: (Model a, Model b) => JoinTableNames a b -> Query
-joinTableQuery jt = Query $ S.concat [
+mkJoinQueryTemplate :: (Model a, Model b) =>
+                       JoinTableInfo a b -> JoinQueryTemplate a b
+mkJoinQueryTemplate jt = JoinQueryTemplate $ Query $ S.concat [
     "select ", qcols b, " from "
   , quoteIdent (jtTable jt), " join ", quoteIdent (modelInfoName b)
   , " on ", quoteIdent (jtTable jt), ".", quoteIdent (jtColumnB jt)
@@ -143,44 +147,60 @@ joinTableQuery jt = Query $ S.concat [
           where qname = quoteIdent $ modelInfoName mi
                 qcol c = qname <> "." <> quoteIdent c
 
+class (Model a, Model b) => Joinable a b where
+  joinTable :: JoinTableInfo a b
+  joinQueryTemplate :: JoinQueryTemplate a b
+  {-# INLINE joinQueryTemplate #-}
+  joinQueryTemplate = mkJoinQueryTemplate $ joinTable
 
-flipJoinTable :: JoinTableNames a b -> JoinTableNames b a
-flipJoinTable jt = JoinTableNames { jtTable = jtTable jt
-                                  , jtColumnA = jtColumnB jt
-                                  , jtKeyA = jtKeyB jt
-                                  , jtColumnB = jtColumnA jt
-                                  , jtKeyB = jtKeyA jt
-                                  }
+joinTableNameModels :: (Model a, Model b) =>
+                       JoinTableInfo a b -> (ModelInfo a, ModelInfo b)
+joinTableNameModels _ = (modelInfo, modelInfo)
 
-joinTable :: (Model a, Model b) => JoinTableNames a b
-joinTable = jti
+joinDefault :: (Model a, Model b) => JoinTableInfo a b
+joinDefault = jti
   where (a, b) = joinTableNameModels jti
         keya = modelColumns a !! modelPrimaryColumn a
         keyb = modelColumns b !! modelPrimaryColumn b
-        jti = JoinTableNames {
+        jti = JoinTableInfo {
             jtTable = S.intercalate "_" $
                           sort [modelInfoName a, modelInfoName b]
           , jtColumnA = S.concat [modelInfoName a, "_", keya]
           , jtKeyA = keya
           , jtColumnB = S.concat [modelInfoName b, "_", keyb]
           , jtKeyB = keyb
+          , jtDummy = DummyForRetainingTypes
           }
 
+
+flipJoinTableInfo :: JoinTableInfo a b -> JoinTableInfo b a
+flipJoinTableInfo jt = JoinTableInfo { jtTable = jtTable jt
+                                     , jtColumnA = jtColumnB jt
+                                     , jtKeyA = jtKeyB jt
+                                     , jtColumnB = jtColumnA jt
+                                     , jtKeyB = jtKeyA jt
+                                     , jtDummy = DummyForRetainingTypes
+                                     }
+
+joinReverse :: (Joinable a b) => JoinTableInfo b a
+joinReverse = flipJoinTableInfo joinTable
+
 {-
-joinModel :: (Model jt, Model a, Model b, Generic jt
+modelJoin :: (Model jt, Model a, Model b, Generic jt
              , GHasMaybeField (Rep jt) (DBRef TYes)
-             => JoinTableNames a b
+             => JoinTableInfo a b
 -}
 
-class (Model a, Model b) => Joinable a b where
-  joinInfo :: JoinInfo a b
 
-jtJoinOf :: (Model a, Model b) => JoinInfo a b -> Connection -> a -> IO [b]
-jtJoinOf jt conn a = do
-  map lookupRow <$> query conn (joinQuery jt) (Only $ primaryKey a)
+jtJoinOf :: (Model a, Model b) =>
+            JoinQueryTemplate a b -> Connection -> a -> IO [b]
+jtJoinOf (JoinQueryTemplate q) conn a =
+  map lookupRow <$> query conn q (Only $ primaryKey a)
 
 findJoin :: (Joinable a b) => Connection -> a -> IO [b]
-findJoin = jtJoinOf joinInfo
+findJoin = jtJoinOf joinQueryTemplate
+
+
 
 
 {-
