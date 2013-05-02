@@ -5,8 +5,7 @@ module Database.PostgreSQL.ORM.Model (
     DBKeyType, DBKey(..), isNullKey
     , Model(..), ModelInfo(..), modelToInfo, modelName, primaryKey
     , LookupRow(..), UpdateRow(..), InsertRow(..)
-    , DBRef(..), mkDBRef, DBURef(..), mkDBURef
-    , IsDBRef, dbRefToInfo
+    , GDBRef(..), DBRef, DBURef, mkDBRef
       -- * Database operations
     , findKey, findRef, save
       -- * Low-level functions providing piecemeal access to defaults
@@ -16,8 +15,8 @@ module Database.PostgreSQL.ORM.Model (
     , defaultModelLookupQuery, defaultModelUpdateQuery, defaultModelInsertQuery
       -- * Low-level functions for generic FromRow/ToRow
     , GFromRow(..), defaultFromRow, GToRow(..), defaultToRow
-      -- * Helper functions
-    , quoteIdent
+      -- * Helper functions and miscellaneous internals
+    , quoteIdent, ShowRefType(..), NormalRef(..), UniqueRef(..)
     ) where
 
 import Control.Applicative
@@ -319,57 +318,43 @@ primaryKey :: (Model a) => a -> DBKey
 {-# INLINE primaryKey #-}
 primaryKey a = modelGetPrimaryKey modelInfo a
 
-class IsDBRef r where
-  toDBRef :: DBKeyType -> r a
-  fromDBRef :: r a -> DBKeyType
+newtype GDBRef reftype table = GDBRef DBKeyType deriving (Typeable)
 
+class ShowRefType rt where showRefType :: r rt t -> String
+
+instance (ShowRefType rt, Model t) => Show (GDBRef rt t) where
+  showsPrec n r@(GDBRef k) = showParen (n > 10) $
+    (showRefType r ++) . ("{" ++) . (mname ++) . ("} " ++) . showsPrec 11 k
+    where gmi :: (Model t) => x t -> ModelInfo t
+          gmi _ = modelInfo
+          mname = S8.unpack $ modelInfoName $ gmi r
+instance FromField (GDBRef rt t) where
+  {-# INLINE fromField #-}
+  fromField f bs = GDBRef <$> fromField f bs
+instance ToField (GDBRef rt t) where
+  {-# INLINE toField #-}
+  toField (GDBRef k) = toField k
+
+data NormalRef = NormalRef deriving (Show, Typeable)
 -- | A Haskell data type representing a foreign key reference in in
 -- the database.  This data type only makes sense to use when type @a@
 -- is also 'Model'.
-newtype DBRef a = DBRef DBKeyType deriving (Eq, Ord, Typeable)
-instance (Model a) => Show (DBRef a) where
-  showsPrec n r@(DBRef k) = showParen (n > 10) $
-    ("DBRef{" ++ ) . (mname ++) . ("} " ++) . showsPrec 11 k
-    where mname = S8.unpack $ modelInfoName $ dbRefToInfo r
-instance FromField (DBRef a) where fromField f bs = DBRef <$> fromField f bs
-instance ToField (DBRef a) where toField (DBRef k) = toField k
-instance IsDBRef DBRef where
-  {-# INLINE toDBRef #-}
-  toDBRef = DBRef
-  {-# INLINE fromDBRef #-}
-  fromDBRef (DBRef k) = k
+type DBRef = GDBRef NormalRef
+instance ShowRefType NormalRef where showRefType _ = "DBRef"
 
-mkDBRef :: (Model a) => a -> DBRef a
-mkDBRef a
-  | (DBKey k) <- primaryKey a = DBRef k
-  | otherwise = error $ "mkDBRef " ++ S8.unpack (modelName a) ++ ": NullKey"
-
+data UniqueRef = UniqueRef deriving (Show, Typeable)
 -- | A @DBURef@ is like a 'DBRef', but with an added uniqeuness
 -- constraint.  In other words, if type @A@ contains a @DBURef B@,
 -- then each @B@ has one (or at most one) @A@ associated with it.  By
 -- contrast, if type @A@ contains a @'DBRef' B@, then each @B@ may be
 -- associated with many rows of type @A@.
-newtype DBURef a = DBURef DBKeyType deriving (Eq, Ord, Typeable)
-instance (Model a) => Show (DBURef a) where
-  showsPrec n r@(DBURef k) = showParen (n > 10) $
-    ("DBRef{" ++ ) . (mname ++) . ("} " ++) . showsPrec 11 k
-    where mname = S8.unpack $ modelInfoName $ dbRefToInfo r
-instance FromField (DBURef a) where fromField f bs = DBURef <$> fromField f bs
-instance ToField (DBURef a) where toField (DBURef k) = toField k
-instance IsDBRef DBURef where
-  {-# INLINE toDBRef #-}
-  toDBRef = DBURef
-  {-# INLINE fromDBRef #-}
-  fromDBRef (DBURef k) = k
+type DBURef = GDBRef UniqueRef
+instance ShowRefType UniqueRef where showRefType _ = "DBURef"
 
-mkDBURef :: (Model a) => a -> DBURef a
-mkDBURef a
-  | (DBKey k) <- primaryKey a = DBURef k
-  | otherwise = error $ "mkDBURef " ++ S8.unpack (modelName a) ++ ": NullKey"
-
-dbRefToInfo :: (Model a, IsDBRef r) => r a -> ModelInfo a
-{-# INLINE dbRefToInfo #-}
-dbRefToInfo _ = modelInfo
+mkDBRef :: (Model a) => a -> GDBRef rt a
+mkDBRef a
+  | (DBKey k) <- primaryKey a = GDBRef k
+  | otherwise = error $ "mkDBRef " ++ S8.unpack (modelName a) ++ ": NullKey"
 
 
 -- | A newtype wrapper in the 'FromRow' class, permitting every model
@@ -401,8 +386,8 @@ findKey c k = action
                     case rs of [r] -> return $ Just $ lookupRow $ r
                                _   -> return Nothing
 
-findRef :: (Model r, IsDBRef k) => Connection -> k r -> IO (Maybe r)
-findRef c kr = findKey c (DBKey $ fromDBRef kr)
+findRef :: (Model r) => Connection -> GDBRef rt r -> IO (Maybe r)
+findRef c (GDBRef k) = findKey c (DBKey k)
 
 -- | Write a 'Model' to the database.  If the primary key is
 -- 'NullKey', the item is written with an @INSERT@ query, read back

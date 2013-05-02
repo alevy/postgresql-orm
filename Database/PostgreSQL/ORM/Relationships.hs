@@ -12,6 +12,7 @@ import qualified Data.ByteString.Char8 as S8
 import Data.Functor
 import Data.List
 import Data.Maybe
+import Data.Monoid
 import Database.PostgreSQL.Simple
 import Database.PostgreSQL.Simple.Types
 import GHC.Generics
@@ -56,6 +57,13 @@ defaultDBRefInfo = rd
           , dbrefQuery = Query qstr
           }
 
+getParentRef :: (Generic child
+                , GHasMaybeField (Rep child) (GDBRef rt parent) TYes) =>
+                rt -> child -> DBRef parent
+getParentRef rt c = forcert rt $ fromJust $ getMaybeFieldVal c
+  where forcert :: rt -> GDBRef rt parent -> DBRef parent
+        forcert _ (GDBRef k) = GDBRef k
+
 class (Model parent, Model child) => HasOne parent child where
   hasOneInfo :: DBRefInfo DBURef child parent
   default hasOneInfo :: (Model child, Generic child
@@ -72,18 +80,25 @@ class (Model parent, Model child) => HasMany parent child where
   {-# INLINE hasManyInfo #-}
   hasManyInfo = defaultDBRefInfo
 
+-- | The default only works for 'HasMany' relationships.  For 'HasOne'
+-- (meaning the field is of type 'DBURef' instead of 'DBRef'), you
+-- will need to say:
+--
+-- > instance HasParent Child Parent where
+-- >     parentRef = getParentRef UniqueRef
+--
+class (Model parent) => HasParent child parent where
+  parentRef :: child -> DBRef parent
+  default parentRef :: (Generic child
+                       , GHasMaybeField (Rep child) (DBRef parent) TYes) =>
+                       child -> DBRef parent
+  parentRef = getParentRef NormalRef
 
-rdParentOf :: (IsDBRef r, Model parent) =>
-              DBRefInfo r child parent -> Connection -> child
-              -> IO (Maybe parent)
-rdParentOf rd conn c = findRef conn $ dbrefSelector rd c
-
-rdChildrenOf :: (Model child, IsDBRef r, Model parent) =>
-                DBRefInfo r child parent -> Connection -> parent
+rdChildrenOf :: (Model child, Model parent) =>
+                DBRefInfo (GDBRef rt) child parent -> Connection -> parent
                 -> IO [child]
 rdChildrenOf rd conn p =
   map lookupRow <$> query conn (dbrefQuery rd) (Only $ primaryKey p)
-
 
 findOne :: (HasOne parent child) => Connection -> parent -> IO (Maybe child)
 findOne c p = do
@@ -94,52 +109,77 @@ findOne c p = do
 findMany :: (HasMany parent child) => Connection -> parent -> IO [child]
 findMany = rdChildrenOf hasManyInfo
 
+findParent :: (HasParent child parent) =>
+              Connection -> child -> IO (Maybe parent)
+findParent conn child = findRef conn (parentRef child)
 
-data JoinInfo a b = JoinInfo {
-  joinQuery :: !Query
+
+data JoinInfo a b = JoinInfo { joinQuery :: !Query } deriving (Show)
+
+data JoinTableNames a b = JoinTableNames {
+    jtTable :: !S.ByteString   -- ^ Name of the join table in the database
+  , jtColumnA :: !S.ByteString -- ^ Name of referencing column in join table
+  , jtKeyA :: !S.ByteString    -- ^ Name of referenced key field in table A
+  , jtColumnB :: !S.ByteString
+  , jtKeyB :: !S.ByteString
   } deriving (Show)
 
-data JoinTableInfo a b = JoinTableInfo { jtInfoName :: !S.ByteString
-                                       , jtColA :: !S.ByteString
-                                       , jtColB :: !S.ByteString
-                                       , jtKeyA :: !S.ByteString
-                                       , jtKeyB :: !S.ByteString
-                                       } deriving (Show)
+joinTableNameModels :: (Model a, Model b) =>
+                       JoinTableNames a b -> (ModelInfo a, ModelInfo b)
+joinTableNameModels _ = (modelInfo, modelInfo)
 
-flipJoinTableInfo :: JoinTableInfo a b -> JoinTableInfo b a
-flipJoinTableInfo jt = JoinTableInfo { jtInfoName = jtInfoName jt
-                                     , jtColA = jtColB jt
-                                     , jtColB = jtColA jt
-                                     , jtKeyA = jtKeyB jt
-                                     , jtKeyB = jtKeyA jt
-                                     }
+joinTableQuery :: (Model a, Model b) => JoinTableNames a b -> Query
+joinTableQuery jt = Query $ S.concat [
+    "select ", qcols b, " from "
+  , quoteIdent (jtTable jt), " join ", quoteIdent (modelInfoName b)
+  , " on ", quoteIdent (jtTable jt), ".", quoteIdent (jtColumnB jt)
+  , " = ", quoteIdent (modelInfoName b), ".", quoteIdent (jtKeyB jt)
+  , " where ", quoteIdent (jtTable jt), ".", quoteIdent (jtColumnA jt)
+  , " = ?"
+  ]
+  where (_, b) = joinTableNameModels jt
+        qcols :: ModelInfo a => S.ByteString
+        qcols mi = S.intercalate ", " $ map qcol $ modelColumns mi
+          where qname = quoteIdent $ modelInfoName mi
+                qcol c = qname <> "." <> quoteIdent c
 
-defaultJoinTableInfo :: (Model a, Model b) => JoinTableInfo a b
-defaultJoinTableInfo = jti
-  where getmis :: (Model a, Model b) =>
-                  JoinTableInfo a b -> (ModelInfo a, ModelInfo b)
-        getmis _ = (modelInfo, modelInfo)
-        (a, b) = getmis jti
+
+flipJoinTable :: JoinTableNames a b -> JoinTableNames b a
+flipJoinTable jt = JoinTableNames { jtTable = jtTable jt
+                                  , jtColumnA = jtColumnB jt
+                                  , jtKeyA = jtKeyB jt
+                                  , jtColumnB = jtColumnA jt
+                                  , jtKeyB = jtKeyA jt
+                                  }
+
+joinTable :: (Model a, Model b) => JoinTableNames a b
+joinTable = jti
+  where (a, b) = joinTableNameModels jti
         keya = modelColumns a !! modelPrimaryColumn a
         keyb = modelColumns b !! modelPrimaryColumn b
-        jti = JoinTableInfo {
-            jtInfoName = S.intercalate "_" $
-                         sort [modelInfoName a, modelInfoName b]
-          , jtColA = S.concat [modelInfoName a, "_", keya]
-          , jtColB = S.concat [modelInfoName b, "_", keyb]
+        jti = JoinTableNames {
+            jtTable = S.intercalate "_" $
+                          sort [modelInfoName a, modelInfoName b]
+          , jtColumnA = S.concat [modelInfoName a, "_", keya]
           , jtKeyA = keya
+          , jtColumnB = S.concat [modelInfoName b, "_", keyb]
           , jtKeyB = keyb
           }
 
+{-
+joinModel :: (Model jt, Model a, Model b, Generic jt
+             , GHasMaybeField (Rep jt) (DBRef TYes)
+             => JoinTableNames a b
+-}
 
-class (Model a, Model b) => Joins a b where
+class (Model a, Model b) => Joinable a b where
   joinInfo :: JoinInfo a b
 
 jtJoinOf :: (Model a, Model b) => JoinInfo a b -> Connection -> a -> IO [b]
 jtJoinOf jt conn a = do
   map lookupRow <$> query conn (joinQuery jt) (Only $ primaryKey a)
 
-findJoin :: (Joins a b) => Connection -> a -> IO [b]
+findJoin :: (Joinable a b) => Connection -> a -> IO [b]
 findJoin = jtJoinOf joinInfo
 
 
@@ -172,6 +212,6 @@ data Bar = Bar {
 instance Model Bar
 
 bar :: Bar
-bar = Bar NullKey 77 "hi" Nothing
+bar = Bar NullKey 77 "hi" (Just $ GDBRef 3)
 
 instance HasOne Bar Bar
