@@ -36,7 +36,6 @@ instance (Model child) => Show (DBRefInfo r child parent) where
           getmi _ = modelInfo
           mi = getmi rd
 
-
 defaultDBRefInfo :: (Model child, Generic child
                     , GHasMaybeField (Rep child) (r parent) TYes) =>
                     DBRefInfo r child parent
@@ -141,25 +140,35 @@ mkJoinQueryTemplate jt = JoinQueryTemplate $ Query $ S.concat [
   , " where ", quoteIdent (jtTable jt), ".", quoteIdent (jtColumnA jt)
   , " = ?"
   ]
-  where (_, b) = joinTableNameModels jt
-        qcols :: ModelInfo a => S.ByteString
+  where (_, b) = joinTableInfoModels jt
         qcols mi = S.intercalate ", " $ map qcol $ modelColumns mi
           where qname = quoteIdent $ modelInfoName mi
                 qcol c = qname <> "." <> quoteIdent c
 
+-- | To make two 'Model's an instance of the @Joinable@ class, you
+-- must manually specify the 'joinTable'.  There are three convenient
+-- defaults for doing this:
+--
+-- @instance Joinable A B where joinTable = 'joinDefault'
+--
+-- instance Joinable A B where joinTable = 'joinReverse'
+--
+-- instance Joinable A B where
+--     joinTable = 'joinThroughModel' (modelInfo :: ModelInfo C)
+-- @
 class (Model a, Model b) => Joinable a b where
   joinTable :: JoinTableInfo a b
   joinQueryTemplate :: JoinQueryTemplate a b
   {-# INLINE joinQueryTemplate #-}
   joinQueryTemplate = mkJoinQueryTemplate $ joinTable
 
-joinTableNameModels :: (Model a, Model b) =>
+joinTableInfoModels :: (Model a, Model b) =>
                        JoinTableInfo a b -> (ModelInfo a, ModelInfo b)
-joinTableNameModels _ = (modelInfo, modelInfo)
+joinTableInfoModels _ = (modelInfo, modelInfo)
 
 joinDefault :: (Model a, Model b) => JoinTableInfo a b
 joinDefault = jti
-  where (a, b) = joinTableNameModels jti
+  where (a, b) = joinTableInfoModels jti
         keya = modelColumns a !! modelPrimaryColumn a
         keyb = modelColumns b !! modelPrimaryColumn b
         jti = JoinTableInfo {
@@ -185,12 +194,26 @@ flipJoinTableInfo jt = JoinTableInfo { jtTable = jtTable jt
 joinReverse :: (Joinable a b) => JoinTableInfo b a
 joinReverse = flipJoinTableInfo joinTable
 
-{-
-modelJoin :: (Model jt, Model a, Model b, Generic jt
-             , GHasMaybeField (Rep jt) (DBRef TYes)
-             => JoinTableInfo a b
--}
-
+joinThroughModel :: (Model jt, Model a, Model b, Generic jt
+                , GHasMaybeField (Rep jt) (DBRef a) TYes
+                , GHasMaybeField (Rep jt) (DBRef b) TYes) =>
+                ModelInfo jt -> JoinTableInfo a b
+joinThroughModel jt = jti
+  where dummyRef :: ModelInfo a -> DBRef a
+        dummyRef _ = undefined
+        poptycon :: ModelInfo a -> a
+        poptycon _ = undefined
+        (a, b) = joinTableInfoModels jti
+        jti = JoinTableInfo {
+            jtTable = modelInfoName jt
+          , jtColumnA = modelColumns jt !!
+                        getMaybeFieldPos (poptycon jt) (dummyRef a)
+          , jtKeyA = modelColumns a !! modelPrimaryColumn a
+          , jtColumnB = modelColumns jt !!
+                        getMaybeFieldPos (poptycon jt) (dummyRef b)
+          , jtKeyB = modelColumns b !! modelPrimaryColumn b
+          , jtDummy = DummyForRetainingTypes
+          }
 
 jtJoinOf :: (Model a, Model b) =>
             JoinQueryTemplate a b -> Connection -> a -> IO [b]
@@ -228,8 +251,16 @@ data Bar = Bar {
   , bar_string :: !String
   , bar_parent :: !(Maybe (DBURef Bar))
   } deriving (Show, Generic)
-                                    
 instance Model Bar
+
+
+data Joiner = Joiner {
+    jkey :: !DBKey
+  , jcomment :: !String
+  , jfoo :: (DBRef Foo)
+  , jbar :: !(Maybe (DBRef Bar))
+  } deriving (Show, Generic)
+instance Model Joiner
 
 bar :: Bar
 bar = Bar NullKey 77 "hi" (Just $ GDBRef 3)
