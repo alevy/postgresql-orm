@@ -3,20 +3,24 @@
 
 module Database.PostgreSQL.ORM.Model (
     DBKeyType, DBKey(..), isNullKey
-    , Model(..), ModelInfo(..), modelToInfo, modelName, primaryKey
+    , Model(..), ModelInfo(..), ModelQueries(..)
+    , modelToInfo, gmodelToInfo, modelToQueries, gmodelToQueries
+    , modelName, primaryKey
     , LookupRow(..), UpdateRow(..), InsertRow(..)
     , GDBRef(..), DBRef, DBURef, mkDBRef
       -- * Database operations
-    , findKey, findRef, save
+    , findKey, findRef, save, destroy, destroyByRef
       -- * Low-level functions providing piecemeal access to defaults
     , defaultModelInfo
     , defaultModelInfoName, defaultModelColumns, defaultModelGetPrimaryKey
     , defaultModelRead, defaultModelWrite
-    , defaultModelLookupQuery, defaultModelUpdateQuery, defaultModelInsertQuery
+    , defaultModelQueries
+    , defaultModelLookupQuery, defaultModelUpdateQuery
+    , defaultModelInsertQuery, defaultModelDeleteQuery
       -- * Low-level functions for generic FromRow/ToRow
     , GFromRow(..), defaultFromRow, GToRow(..), defaultToRow
       -- * Helper functions and miscellaneous internals
-    , quoteIdent, gmodelToInfo, ShowRefType(..), NormalRef(..), UniqueRef(..)
+    , quoteIdent, ShowRefType(..), NormalRef(..), UniqueRef(..)
     ) where
 
 import Control.Applicative
@@ -98,31 +102,12 @@ data ModelInfo a = Model {
   , modelWrite :: !(a -> [Action])
     -- ^ Format all fields except the primary key for writing the
     -- model to the database.
-  , modelLookupQuery :: !Query
-    -- ^ A query template for looking up a model by its primary key.
-    -- Should expect a single query parameter, namely the 'DBKey'
-    -- being looked up.
-  , modelUpdateQuery :: !Query
-    -- ^ A query template for updating an existing 'Model' in the
-    -- database.  Expects as query parameters every column of the
-    -- model /except/ the primary key, followed by the primary key.
-    -- (The primary key is not written to the database, just used to
-    -- select the row to change.)
-  , modelInsertQuery :: !Query
-    -- ^ A query template for inserting a new 'Model' in the database.
-    -- The query parameters are all columns /except/ the primary key.
-  , modelDeleteQuery :: !Query
-    -- ^ A query template for deleting a 'Model' from the database.
-    -- The query paremeter is the primary key of the row to delete.
   }
 
 instance Show (ModelInfo a) where
   show a = intercalate " " ["Model", show $ modelInfoName a
                            , show $ modelColumns a, show $ modelPrimaryColumn a
-                           , "???"
-                           , show $ fromQuery $ modelLookupQuery a
-                           , show $ fromQuery $ modelInsertQuery a
-                           , show $ fromQuery $ modelUpdateQuery a]
+                           , "???"]
 
 class GDatatypeName f where
   gDatatypeName :: f p -> String
@@ -212,19 +197,57 @@ defaultModelWrite :: (Generic a, GToRow (Rep a)) =>
 defaultModelWrite pki = deleteAt pki . defaultToRow
 
 
-q :: S.ByteString -> S.ByteString
-q iden = S8.pack $ '"' : (go $ S8.unpack iden)
+defaultModelInfo :: (Generic a, GToRow (Rep a), GFromRow (Rep a)
+                    , GPrimaryKey0 (Rep a), GColumns (Rep a)
+                    , GDatatypeName (Rep a)) => ModelInfo a
+defaultModelInfo = m
+  where m = Model { modelInfoName = mname
+                  , modelColumns = cols
+                  , modelPrimaryColumn = pki
+                  , modelGetPrimaryKey = defaultModelGetPrimaryKey
+                  , modelRead = defaultModelRead
+                  , modelWrite = defaultModelWrite pki
+                  }
+        unModel :: ModelInfo a -> a
+        unModel _ = undefined
+        a = unModel m
+        mname = defaultModelInfoName a
+        pki = 0
+        cols = defaultModelColumns a
+
+data ModelQueries a = ModelQueries {
+    modelLookupQuery :: !Query
+    -- ^ A query template for looking up a model by its primary key.
+    -- Should expect a single query parameter, namely the 'DBKey'
+    -- being looked up.
+  , modelUpdateQuery :: !Query
+    -- ^ A query template for updating an existing 'Model' in the
+    -- database.  Expects as query parameters every column of the
+    -- model /except/ the primary key, followed by the primary key.
+    -- (The primary key is not written to the database, just used to
+    -- select the row to change.)
+  , modelInsertQuery :: !Query
+    -- ^ A query template for inserting a new 'Model' in the database.
+    -- The query parameters are all columns /except/ the primary key.
+  , modelDeleteQuery :: !Query
+    -- ^ A query template for deleting a 'Model' from the database.
+    -- The query paremeter is the primary key of the row to delete.
+  } deriving (Show)
+
+quoteIdent :: S.ByteString -> S.ByteString
+quoteIdent iden = S8.pack $ '"' : (go $ S8.unpack iden)
   where go ('"':cs) = '"':'"':go cs
         go ('\0':_) = error $ "q: illegal NUL character in " ++ show iden
         go (c:cs)   = c:go cs
         go []       = '"':[]
 
-quoteIdent :: S.ByteString -> S.ByteString
-quoteIdent = q
+q :: S.ByteString -> S.ByteString
+q = quoteIdent
 
 fmtCols :: Bool -> [S.ByteString] -> S.ByteString
 fmtCols False cs = S.intercalate ", " (map q cs)
 fmtCols True cs = "(" <> fmtCols False cs <> ")"
+
 
 defaultModelLookupQuery :: S.ByteString -- ^ Name of database table
                            -> [S.ByteString] -- ^ Names of columns
@@ -263,28 +286,16 @@ defaultModelDeleteQuery t cs pki = Query $ S.concat [
   "delete from ", q t, " where ", q (cs !! pki), " = ?"
   ]
 
-
-defaultModelInfo :: (Generic a, GToRow (Rep a), GFromRow (Rep a)
-                    , GPrimaryKey0 (Rep a), GColumns (Rep a)
-                    , GDatatypeName (Rep a)) => ModelInfo a
-defaultModelInfo = m
-  where m = Model { modelInfoName = mname
-                  , modelColumns = cols
-                  , modelPrimaryColumn = pki
-                  , modelGetPrimaryKey = defaultModelGetPrimaryKey
-                  , modelRead = defaultModelRead
-                  , modelWrite = defaultModelWrite pki
-                  , modelLookupQuery = defaultModelLookupQuery mname cols pki
-                  , modelInsertQuery = defaultModelInsertQuery mname cols pki
-                  , modelUpdateQuery = defaultModelUpdateQuery mname cols pki
-                  , modelDeleteQuery = defaultModelDeleteQuery mname cols pki
-                  }
-        unModel :: ModelInfo a -> a
-        unModel _ = undefined
-        a = unModel m
-        mname = defaultModelInfoName a
-        pki = 0
-        cols = defaultModelColumns a
+defaultModelQueries :: ModelInfo a -> ModelQueries a
+defaultModelQueries mi = ModelQueries {
+    modelLookupQuery = defaultModelLookupQuery mname cols pki
+  , modelInsertQuery = defaultModelInsertQuery mname cols pki
+  , modelUpdateQuery = defaultModelUpdateQuery mname cols pki
+  , modelDeleteQuery = defaultModelDeleteQuery mname cols pki
+  }
+  where mname = modelInfoName mi
+        cols = modelColumns mi
+        pki = modelPrimaryColumn mi
 
 
 -- | Class of data types representing a database table.  Provides a
@@ -318,6 +329,8 @@ class Model a where
                        , GDatatypeName (Rep a)) => ModelInfo a
   {-# INLINE modelInfo #-}
   modelInfo = defaultModelInfo
+  modelQueries :: ModelQueries a
+  modelQueries = defaultModelQueries modelInfo
 
 modelToInfo :: (Model a) => a -> ModelInfo a
 {-# INLINE modelToInfo #-}
@@ -326,6 +339,14 @@ modelToInfo _ = modelInfo
 gmodelToInfo :: (Model a) => g a -> ModelInfo a
 {-# INLINE gmodelToInfo #-}
 gmodelToInfo _ = modelInfo
+
+modelToQueries :: (Model a) => a -> ModelQueries a
+{-# INLINE modelToQueries #-}
+modelToQueries _ = modelQueries
+
+gmodelToQueries :: (Model a) => g a -> ModelQueries a
+{-# INLINE gmodelToQueries #-}
+gmodelToQueries _ = modelQueries
 
 modelName :: (Model a) => a -> S.ByteString
 {-# INLINE modelName #-}
@@ -394,10 +415,10 @@ instance (Model a) => ToRow (UpdateRow a) where
 findKey :: (Model r) => Connection -> DBKey -> IO (Maybe r)
 findKey _ NullKey = error "findKey: NullKey"
 findKey c k = action
-  where getInfo :: (Model r) => IO (Maybe r) -> ModelInfo r
-        getInfo _ = modelInfo
-        m = getInfo action
-        action = do rs <- query c (modelLookupQuery m) (Only k)
+  where getInfo :: (Model r) => IO (Maybe r) -> ModelQueries r
+        getInfo _ = modelQueries
+        qs = getInfo action
+        action = do rs <- query c (modelLookupQuery qs) (Only k)
                     case rs of [r] -> return $ Just $ lookupRow $ r
                                _   -> return Nothing
 
@@ -411,20 +432,20 @@ findRef c (GDBRef k) = findKey c (DBKey k)
 -- an @UPDATE@ query and returned as-is.
 save :: (Model r) => Connection -> r -> IO r
 save c r | NullKey <- primaryKey r = do
-               rs <- query c (modelInsertQuery m) (InsertRow r)
+               rs <- query c (modelInsertQuery qs) (InsertRow r)
                case rs of [r'] -> return $ lookupRow r'
                           _    -> fail "save: database did not return row"
          | otherwise = do
-               n <- execute c (modelUpdateQuery m) (UpdateRow r)
+               n <- execute c (modelUpdateQuery qs) (UpdateRow r)
                case n of 1 -> return r
                          _ -> fail $ "save: database updated " ++ show n
                                      ++ " records"
-  where m = modelToInfo r
+  where qs = modelToQueries r
 
 destroyByRef :: (Model a) => Connection -> GDBRef rt a -> IO ()
 destroyByRef c a =
-  void $ execute c (modelDeleteQuery $ gmodelToInfo a) (Only a)
+  void $ execute c (modelDeleteQuery $ gmodelToQueries a) (Only a)
 
 destroy :: (Model a) => Connection -> a -> IO ()
 destroy c a =
-  void $ execute c (modelDeleteQuery $ modelToInfo a) (Only $ primaryKey a)
+  void $ execute c (modelDeleteQuery $ modelToQueries a) (Only $ primaryKey a)
