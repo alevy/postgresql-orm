@@ -118,6 +118,7 @@ instance Show (DummyForRetainingTypes a b) where show _ = ""
 
 data JoinTableInfo a b = JoinTableInfo {
     jtTable :: !S.ByteString   -- ^ Name of the join table in the database
+  , jtAllowUpdates :: !Bool    -- ^ If False, only allow reads
   , jtColumnA :: !S.ByteString -- ^ Name of ref to A in join table
   , jtKeyA :: !S.ByteString    -- ^ Name of referenced key field in table A
   , jtColumnB :: !S.ByteString
@@ -174,6 +175,7 @@ joinDefault = jti
         jti = JoinTableInfo {
             jtTable = S.intercalate "_" $
                           sort [modelInfoName a, modelInfoName b]
+          , jtAllowUpdates = True
           , jtColumnA = S.concat [modelInfoName a, "_", keya]
           , jtKeyA = keya
           , jtColumnB = S.concat [modelInfoName b, "_", keyb]
@@ -184,6 +186,7 @@ joinDefault = jti
 
 flipJoinTableInfo :: JoinTableInfo a b -> JoinTableInfo b a
 flipJoinTableInfo jt = JoinTableInfo { jtTable = jtTable jt
+                                     , jtAllowUpdates = jtAllowUpdates jt
                                      , jtColumnA = jtColumnB jt
                                      , jtKeyA = jtKeyB jt
                                      , jtColumnB = jtColumnA jt
@@ -194,11 +197,11 @@ flipJoinTableInfo jt = JoinTableInfo { jtTable = jtTable jt
 joinReverse :: (Joinable a b) => JoinTableInfo b a
 joinReverse = flipJoinTableInfo joinTable
 
-joinThroughModel :: (Model jt, Model a, Model b, Generic jt
+joinThroughModelInfo :: (Model jt, Model a, Model b, Generic jt
                 , GHasMaybeField (Rep jt) (DBRef a) TYes
                 , GHasMaybeField (Rep jt) (DBRef b) TYes) =>
                 ModelInfo jt -> JoinTableInfo a b
-joinThroughModel jt = jti
+joinThroughModelInfo jt = jti
   where dummyRef :: ModelInfo a -> DBRef a
         dummyRef _ = undefined
         poptycon :: ModelInfo a -> a
@@ -206,6 +209,7 @@ joinThroughModel jt = jti
         (a, b) = joinTableInfoModels jti
         jti = JoinTableInfo {
             jtTable = modelInfoName jt
+          , jtAllowUpdates = True
           , jtColumnA = modelColumns jt !!
                         getMaybeFieldPos (poptycon jt) (dummyRef a)
           , jtKeyA = modelColumns a !! modelPrimaryColumn a
@@ -214,6 +218,12 @@ joinThroughModel jt = jti
           , jtKeyB = modelColumns b !! modelPrimaryColumn b
           , jtDummy = DummyForRetainingTypes
           }
+
+joinThroughModel :: (Model jt, Model a, Model b, Generic jt
+                   , GHasMaybeField (Rep jt) (DBRef a) TYes
+                   , GHasMaybeField (Rep jt) (DBRef b) TYes) =>
+                   jt -> JoinTableInfo a b
+joinThroughModel = joinThroughModelInfo . modelToInfo
 
 jtJoinOf :: (Model a, Model b) =>
             JoinQueryTemplate a b -> Connection -> a -> IO [b]
@@ -264,5 +274,8 @@ instance Model Joiner
 
 bar :: Bar
 bar = Bar NullKey 77 "hi" (Just $ GDBRef 3)
+
+instance Joinable Foo Bar where
+  joinTable = (joinThroughModel (undefined :: Joiner)) { jtAllowUpdates = True }
 
 instance HasOne Bar Bar
