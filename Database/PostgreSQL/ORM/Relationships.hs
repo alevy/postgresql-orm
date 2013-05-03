@@ -1,26 +1,41 @@
 {-# LANGUAGE DefaultSignatures #-}
-{-# LANGUAGE DeriveGeneric #-}
+-- {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-module Database.PostgreSQL.ORM.Relationships where
+module Database.PostgreSQL.ORM.Relationships (
+  -- * Foreign key references
+    DBRefInfo(..), DBRefQuery(..)
+  , HasMany(..), findMany, HasOne(..), findOne
+  , HasParent(..), findParent
+  -- ** Foreign key default methods
+  , defaultDBRefInfo, defaultParentKey, defaultChildQuery
+  -- * Join tables
+  , JoinTableInfo(..), JoinTableQueries(..), Joinable(..)
+  , findJoin, addJoin, removeJoin
+  -- ** Join table construction functions
+  , joinDefault, joinReverse, joinThroughModel, joinThroughModelInfo
+  -- ** Join table default queries
+  , defaultJoinTableQueries
+  , defaultjtLookupQuery, defaultjtAddQuery, defaultjtRemoveQuery
+  -- * Internal details
+  , DummyForRetainingTypes(..)
+  ) where
 
 import qualified Data.ByteString as S
--- import qualified Data.ByteString.Char8 as S8
 import Data.Functor
+import Data.Int
 import Data.List
 import Data.Maybe
-import Data.Monoid
 import Database.PostgreSQL.Simple
 import Database.PostgreSQL.Simple.Types
 
 import Data.HasField
 import Database.PostgreSQL.ORM.Model
 
-import GHC.Generics
-import Data.Int
+-- import GHC.Generics
 
 data DBRefInfo reftype child parent = DBRefInfo {
     dbrefSelector :: !(child -> GDBRef reftype parent)
@@ -72,19 +87,19 @@ class (Model parent, Model child) => HasOne parent child where
   {-# INLINE hasOneQuery #-}
   hasOneQuery = defaultChildQuery hasOneInfo
 
-getParentKey :: DBRefInfo rt c p -> c -> DBRef p
-getParentKey ri c = case dbrefSelector ri c of DBRef k -> DBRef k
+defaultParentKey :: DBRefInfo rt c p -> c -> DBRef p
+defaultParentKey ri c = case dbrefSelector ri c of DBRef k -> DBRef k
 
 -- | The default only works for 'HasMany' relationships.  For 'HasOne'
 -- (meaning the field is of type 'DBURef' instead of 'DBRef'), you
 -- will need to say:
 --
 -- > instance HasParent Child Parent where
--- >     parentKey = getParentKey hasOneInfo
+-- >     parentKey = defaultParentKey hasOneInfo
 class (Model child, Model parent) => HasParent child parent where
   parentKey :: child -> DBRef parent
   default parentKey :: (HasMany parent child) => child -> DBRef parent
-  parentKey = getParentKey hasManyInfo
+  parentKey = defaultParentKey hasManyInfo
 
 rdChildrenOf :: (Model child, Model parent) =>
                 DBRefQuery rt child parent -> Connection -> parent -> IO [child]
@@ -143,9 +158,10 @@ defaultJoinTableQueries :: (Model a, Model b) =>
                            JoinTableInfo a b -> JoinTableQueries a b
 defaultJoinTableQueries jt = JoinTableQueries {
     jtLookupQuery = defaultjtLookupQuery jt
-  , jtAddQuery = defaultjtAddQuery False jt
+  , jtAddQuery = if jtAllowModification jt then defaultjtAddQuery False jt
+                 else "select non_standard_join_table_cannot_be_modified"
   , jtRemoveQuery = if jtAllowModification jt then defaultjtRemoveQuery jt
-                    else "select join_table_cannot_be_modified"
+                    else "select non_standard_join_table_cannot_be_modified"
   }
 
 defaultjtLookupQuery :: (Model b) => JoinTableInfo a b -> Query
@@ -157,9 +173,6 @@ defaultjtLookupQuery jt = Query $ S.concat [
   , " = ?"
   ]
   where b = gmodelToInfo jt
-        qcols mi = S.intercalate ", " $ map qcol $ modelColumns mi
-          where qname = quoteIdent $ modelTable mi
-                qcol c = qname <> "." <> quoteIdent c
 
 -- | Creates a query for adding a join relationsihp to the table.  If
 -- the first argument is 'True', then duplicates will be allowed in
@@ -271,9 +284,10 @@ findJoin = jtJoinOf joinTableQueries
 modelsToJTQ :: (Joinable a b) => a -> b -> JoinTableQueries a b
 modelsToJTQ _ _ = joinTableQueries
 
-addJoin :: (Joinable a b) => Connection -> a -> b -> IO Int64
-addJoin c a b = execute c (jtAddQuery $ modelsToJTQ a b)
-                (primaryKey a, primaryKey b, primaryKey a, primaryKey b)
+addJoin :: (Joinable a b) => Connection -> a -> b -> IO Bool
+addJoin c a b = do
+  (> 0) <$> execute c (jtAddQuery $ modelsToJTQ a b)
+    (primaryKey a, primaryKey b, primaryKey a, primaryKey b)
 
 removeJoin :: (Joinable a b) => Connection -> a -> b -> IO Int64
 removeJoin c a b = execute c (jtRemoveQuery $ modelsToJTQ a b)
@@ -290,6 +304,7 @@ select Post.*, User.* from Post, User, Comment where Comment.postId =
 <aalevy> or, i guess "postId"
 -}
 
+{-
 data Foo = Foo {
   foo_key :: !DBKey
   , foo_int :: !Int32
@@ -326,3 +341,4 @@ instance Joinable Bar Foo where
   joinTable = joinReverse
 
 instance HasOne Bar Bar
+-}
