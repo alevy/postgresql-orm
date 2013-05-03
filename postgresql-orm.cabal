@@ -13,8 +13,8 @@ library
                , text
                , time
   ghc-options: -Wall
-  exposed-modules: Database.PostgreSQL.ORM.Fields
-                 , Database.PostgreSQL.ORM.HasField
+  exposed-modules: Data.HasField
+                 , Database.PostgreSQL.ORM.Fields
                  , Database.PostgreSQL.ORM.Model
                  , Database.PostgreSQL.ORM.Relationships
                  , Database.PostgreSQL.ORM.RequireSelector

@@ -10,9 +10,8 @@
 -- 'Generic' data structure, when the data structure contains exactly
 -- one field of the given type.  Only works for types with a single
 -- constructor.
-module Database.PostgreSQL.ORM.HasField
-       (TYes, GHasField, getFieldPos, getFieldVal
-       , GHasMaybeField, getMaybeFieldPos, getMaybeFieldVal) where
+module Data.HasField (
+  HasField(..), HasMaybeField(..)) where
 
 import GHC.Generics
 
@@ -63,17 +62,18 @@ instance (GHasField x f g) => GHasField (M1 i c x) f g where
   gGetField (M1 xp) = gGetField xp
   gFieldCount ~(M1 xp) f = gFieldCount xp f
 
--- | Extract the 0-based position of a field with a particular type
--- inside a data structure.  Requires that exactly one record have the
--- target type.  Not strict in either argument.
-getFieldPos :: (Generic a, GHasField (Rep a) f TYes) => a -> f -> Int
-getFieldPos a f = gFieldCount (from a) f - 1
-
--- | Extract the single field of a particular type from a 'Generic'
--- data structure with exactly one constructor.
-getFieldVal :: (Generic a, GHasField (Rep a) f TYes) => a -> f
-{-# INLINE getFieldVal #-}
-getFieldVal a = fromTYes $ gGetField (from a)
+class (Generic a, GHasField (Rep a) f TYes) => HasField a f where
+  -- | Extract the 0-based position of a field with a particular type
+  -- inside a data structure.  Requires that exactly one record have the
+  -- target type.  Not strict in either argument.
+  getFieldPos :: (HasField a f) => a -> f -> Int
+  -- | Extract the single field of a particular type from a 'Generic'
+  -- data structure with exactly one constructor.
+  getFieldVal :: (HasField a f) => a -> f
+instance (Generic a, GHasField (Rep a) f TYes) => HasField a f where
+  getFieldPos a f = gFieldCount (from a) f - 1
+  {-# INLINE getFieldVal #-}
+  getFieldVal a = fromTYes $ gGetField (from a)
 
 
 class GHasMaybeField t f g | t f -> g where
@@ -104,15 +104,17 @@ instance (GHasMaybeField x f g) => GHasMaybeField (M1 i c x) f g where
   gGetMaybeField (M1 xp) = gGetMaybeField xp
   gMaybeFieldCount ~(M1 xp) f = gMaybeFieldCount xp f
 
--- | Similar to 'getMaybeFieldPos', but looks for a field that is
--- either of type @f@ or of type @Maybe f@.  (Only one field may have
--- either of those two types.)
-getMaybeFieldPos :: (Generic a, GHasMaybeField (Rep a) f TYes) => a -> f -> Int
-getMaybeFieldPos a f = gMaybeFieldCount (from a) f - 1
+class (Generic a, GHasMaybeField (Rep a) f TYes) => HasMaybeField a f where
+  -- | Similar to 'getMaybeFieldPos', but looks for a field that is
+  -- either of type @f@ or of type @Maybe f@.  (Only one field may have
+  -- either of those two types.)
+  getMaybeFieldPos :: (HasMaybeField a f) => a -> f -> Int
+  -- | Similar to 'getFieldVal', but looks for a field that is either of
+  -- type @f@ or of type @Maybe f@.  In the former case, the value is
+  -- wrapped with 'Just', so that the return type is always @Maybe f@.
+  getMaybeFieldVal :: (HasMaybeField a f) => a -> Maybe f
 
--- | Similar to 'getFieldVal', but looks for a field that is either of
--- type @f@ or of type @Maybe f@.  In the former case, the value is
--- wrapped with 'Just', so that the return type is always @Maybe f@.
-getMaybeFieldVal :: (Generic a, GHasMaybeField (Rep a) f TYes) => a -> Maybe f
-{-# INLINE getMaybeFieldVal #-}
-getMaybeFieldVal a = fromTYes $ gGetMaybeField (from a)
+instance (Generic a, GHasMaybeField (Rep a) f TYes) => HasMaybeField a f where
+  getMaybeFieldPos a f = gMaybeFieldCount (from a) f - 1
+  {-# INLINE getMaybeFieldVal #-}
+  getMaybeFieldVal a = fromTYes $ gGetMaybeField (from a)

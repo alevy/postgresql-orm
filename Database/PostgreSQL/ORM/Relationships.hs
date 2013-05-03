@@ -15,11 +15,11 @@ import Data.Maybe
 import Data.Monoid
 import Database.PostgreSQL.Simple
 import Database.PostgreSQL.Simple.Types
-import GHC.Generics
 
-import Database.PostgreSQL.ORM.HasField
+import Data.HasField
 import Database.PostgreSQL.ORM.Model
 
+import GHC.Generics
 import Data.Int
 
 data DBRefInfo r child parent = DBRefInfo {
@@ -36,8 +36,8 @@ instance (Model child) => Show (DBRefInfo r child parent) where
           getmi _ = modelInfo
           mi = getmi rd
 
-defaultDBRefInfo :: (Model child, Generic child
-                    , GHasMaybeField (Rep child) (r parent) TYes) =>
+defaultDBRefInfo :: (Model child
+                    , HasMaybeField child (r parent)) =>
                     DBRefInfo r child parent
 defaultDBRefInfo = rd
   where getTypes :: DBRefInfo r child parent -> (child, r parent)
@@ -56,8 +56,7 @@ defaultDBRefInfo = rd
           , dbrefQuery = Query qstr
           }
 
-getParentRef :: (Generic child
-                , GHasMaybeField (Rep child) (GDBRef rt parent) TYes) =>
+getParentRef :: (HasMaybeField child (GDBRef rt parent)) =>
                 rt -> child -> DBRef parent
 getParentRef rt c = forcert rt $ fromJust $ getMaybeFieldVal c
   where forcert :: rt -> GDBRef rt parent -> DBRef parent
@@ -65,16 +64,16 @@ getParentRef rt c = forcert rt $ fromJust $ getMaybeFieldVal c
 
 class (Model parent, Model child) => HasOne parent child where
   hasOneInfo :: DBRefInfo DBURef child parent
-  default hasOneInfo :: (Model child, Generic child
-                        , GHasMaybeField (Rep child) (DBURef parent) TYes) =>
+  default hasOneInfo :: (Model child
+                        , HasMaybeField child (DBURef parent)) =>
                         DBRefInfo DBURef child parent
   {-# INLINE hasOneInfo #-}
   hasOneInfo = defaultDBRefInfo
 
 class (Model parent, Model child) => HasMany parent child where
   hasManyInfo :: DBRefInfo DBRef child parent
-  default hasManyInfo :: (Model child, Generic child
-                         , GHasMaybeField (Rep child) (DBRef parent) TYes) =>
+  default hasManyInfo :: (Model child
+                         , HasMaybeField child (DBRef parent)) =>
                          DBRefInfo DBRef child parent
   {-# INLINE hasManyInfo #-}
   hasManyInfo = defaultDBRefInfo
@@ -88,8 +87,7 @@ class (Model parent, Model child) => HasMany parent child where
 --
 class (Model parent) => HasParent child parent where
   parentRef :: child -> DBRef parent
-  default parentRef :: (Generic child
-                       , GHasMaybeField (Rep child) (DBRef parent) TYes) =>
+  default parentRef :: (HasMaybeField child (DBRef parent)) =>
                        child -> DBRef parent
   parentRef = getParentRef NormalRef
 
@@ -197,9 +195,9 @@ flipJoinTableInfo jt = JoinTableInfo { jtTable = jtTable jt
 joinReverse :: (Joinable a b) => JoinTableInfo b a
 joinReverse = flipJoinTableInfo joinTable
 
-joinThroughModelInfo :: (Model jt, Model a, Model b, Generic jt
-                , GHasMaybeField (Rep jt) (DBRef a) TYes
-                , GHasMaybeField (Rep jt) (DBRef b) TYes) =>
+joinThroughModelInfo :: (Model jt, Model a, Model b
+                , HasMaybeField jt (DBRef a)
+                , HasMaybeField jt (DBRef b)) =>
                 ModelInfo jt -> JoinTableInfo a b
 joinThroughModelInfo jt = jti
   where dummyRef :: ModelInfo a -> DBRef a
@@ -219,9 +217,9 @@ joinThroughModelInfo jt = jti
           , jtDummy = DummyForRetainingTypes
           }
 
-joinThroughModel :: (Model jt, Model a, Model b, Generic jt
-                   , GHasMaybeField (Rep jt) (DBRef a) TYes
-                   , GHasMaybeField (Rep jt) (DBRef b) TYes) =>
+joinThroughModel :: (Model jt, Model a, Model b
+                   , HasMaybeField jt (DBRef a)
+                   , HasMaybeField jt (DBRef b)) =>
                    jt -> JoinTableInfo a b
 joinThroughModel = joinThroughModelInfo . modelToInfo
 
