@@ -45,7 +45,7 @@ import Database.PostgreSQL.Simple.ToRow
 import Database.PostgreSQL.Simple.Types
 import GHC.Generics
 
-import Database.PostgreSQL.ORM.RequireSelector
+import Data.RequireSelector
 
 -- | A type large enough to hold database primary keys.  Do not use
 -- this type directly in your data structures.  Use 'DBKey' to hold a

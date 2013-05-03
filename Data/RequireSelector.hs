@@ -1,11 +1,11 @@
 {-# LANGUAGE FlexibleInstances, UndecidableInstances #-}
 
-module Database.PostgreSQL.ORM.RequireSelector (RequireSelector) where
+module Data.RequireSelector (RequireSelector) where
 
 import GHC.Generics
 
 -- | There are intentionally no members of this class, so that placing
--- it in a context will always call an error.
+-- it in a context will always cause an error.
 class IntentionallyCauseError a
 
 -- | The point of this class is to ensure that you are using data
