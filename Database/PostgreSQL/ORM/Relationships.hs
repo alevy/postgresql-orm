@@ -121,11 +121,21 @@ data JoinTableInfo a b = JoinTableInfo {
     -- parameters @a@ and @b@.
   } deriving (Show)
 
-data JoinQueryTemplate a b = JoinQueryTemplate !Query deriving (Show)
+data JoinTableQueries a b = JoinTableQueries {
+  jtLookupQuery :: !Query
+  -- , jtAddQuery :: !Query
+  -- , jtDeleteQuery :: !Query
+  } deriving (Show)
 
-mkJoinQueryTemplate :: (Model a, Model b) =>
-                       JoinTableInfo a b -> JoinQueryTemplate a b
-mkJoinQueryTemplate jt = JoinQueryTemplate $ Query $ S.concat [
+defaultJoinTableQueries :: (Model a, Model b) =>
+                           JoinTableInfo a b -> JoinTableQueries a b
+defaultJoinTableQueries jt = JoinTableQueries {
+    jtLookupQuery = defaultjtLookupQuery jt
+  }
+
+defaultjtLookupQuery :: (Model a, Model b) =>
+                        JoinTableInfo a b -> Query
+defaultjtLookupQuery jt = Query $ S.concat [
   modelSelectFragment b, " join ", quoteIdent (jtTable jt)
   , " on ", quoteIdent (jtTable jt), ".", quoteIdent (jtColumnB jt)
   , " = ", quoteIdent (modelTable b), ".", quoteIdent (jtKeyB jt)
@@ -150,9 +160,9 @@ mkJoinQueryTemplate jt = JoinQueryTemplate $ Query $ S.concat [
 -- @
 class (Model a, Model b) => Joinable a b where
   joinTable :: JoinTableInfo a b
-  joinQueryTemplate :: JoinQueryTemplate a b
+  joinQueryTemplate :: JoinTableQueries a b
   {-# INLINE joinQueryTemplate #-}
-  joinQueryTemplate = mkJoinQueryTemplate $ joinTable
+  joinQueryTemplate = defaultJoinTableQueries $ joinTable
 
 joinTableInfoModels :: (Model a, Model b) =>
                        JoinTableInfo a b -> (ModelInfo a, ModelInfo b)
@@ -217,8 +227,8 @@ joinThroughModel :: (Model jt, Model a, Model b
 joinThroughModel = joinThroughModelInfo . modelToInfo
 
 jtJoinOf :: (Model a, Model b) =>
-            JoinQueryTemplate a b -> Connection -> a -> IO [b]
-jtJoinOf (JoinQueryTemplate q) conn a =
+            JoinTableQueries a b -> Connection -> a -> IO [b]
+jtJoinOf JoinTableQueries{ jtLookupQuery = q } conn a =
   map lookupRow <$> query conn q (Only $ primaryKey a)
 
 findJoin :: (Joinable a b) => Connection -> a -> IO [b]
