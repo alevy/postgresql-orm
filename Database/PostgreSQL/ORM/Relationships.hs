@@ -109,10 +109,15 @@ data DummyForRetainingTypes a b = DummyForRetainingTypes
 instance Show (DummyForRetainingTypes a b) where show _ = ""
 
 data JoinTableInfo a b = JoinTableInfo {
-    jtTable :: !S.ByteString   -- ^ Name of the join table in the database
-  , jtAllowUpdates :: !Bool    -- ^ If False, only allow reads
-  , jtColumnA :: !S.ByteString -- ^ Name of ref to A in join table
-  , jtKeyA :: !S.ByteString    -- ^ Name of referenced key field in table A
+    jtTable :: !S.ByteString     -- ^ Name of the join table in the database
+  , jtAllowModification :: !Bool
+    -- ^ If 'False', disallow generic join table functions that modify
+    -- the database.  The default is 'True' for normal join tables,
+    -- but 'False' for 'joinThroughModel', since deleting a join
+    -- relationsip through a model will destroy other columns of the
+    -- join model.
+  , jtColumnA :: !S.ByteString   -- ^ Name of ref to A in join table
+  , jtKeyA :: !S.ByteString      -- ^ Name of referenced key field in table A
   , jtColumnB :: !S.ByteString
   , jtKeyB :: !S.ByteString
   , jtDummy :: DummyForRetainingTypes a b
@@ -122,19 +127,28 @@ data JoinTableInfo a b = JoinTableInfo {
   } deriving (Show)
 
 data JoinTableQueries a b = JoinTableQueries {
-  jtLookupQuery :: !Query
-  -- , jtAddQuery :: !Query
-  -- , jtDeleteQuery :: !Query
+    jtLookupQuery :: !Query
+    -- ^ Query takes 2 parameters, the primary keys of @a@ and @b@
+    -- respectively.
+  , jtAddQuery :: !Query
+    -- ^ Query takes 4 parameters, namely two copies of each primary
+    -- keys (@a@, @b@, @a@, @b@).  The redundancy is necessary for
+    -- avoiding duplicate join table entries.
+  , jtRemoveQuery :: !Query
+    -- ^ Query takes 2 parameters, the primary keys of @a@ and @b@
+    -- respectively.
   } deriving (Show)
 
 defaultJoinTableQueries :: (Model a, Model b) =>
                            JoinTableInfo a b -> JoinTableQueries a b
 defaultJoinTableQueries jt = JoinTableQueries {
     jtLookupQuery = defaultjtLookupQuery jt
+  , jtAddQuery = defaultjtAddQuery False jt
+  , jtRemoveQuery = if jtAllowModification jt then defaultjtRemoveQuery jt
+                    else "select join_table_cannot_be_modified"
   }
 
-defaultjtLookupQuery :: (Model a, Model b) =>
-                        JoinTableInfo a b -> Query
+defaultjtLookupQuery :: (Model b) => JoinTableInfo a b -> Query
 defaultjtLookupQuery jt = Query $ S.concat [
   modelSelectFragment b, " join ", quoteIdent (jtTable jt)
   , " on ", quoteIdent (jtTable jt), ".", quoteIdent (jtColumnB jt)
@@ -146,6 +160,25 @@ defaultjtLookupQuery jt = Query $ S.concat [
         qcols mi = S.intercalate ", " $ map qcol $ modelColumns mi
           where qname = quoteIdent $ modelTable mi
                 qcol c = qname <> "." <> quoteIdent c
+
+-- | Creates a query for adding a join relationsihp to the table.  If
+-- the first argument is 'True', then duplicates will be allowed in
+-- the join table.
+defaultjtAddQuery :: (Model a, Model b) => Bool -> JoinTableInfo a b -> Query
+defaultjtAddQuery allowDups jt = Query $ S.concat [
+    "insert into ", quoteIdent (jtTable jt), " ("
+  , quoteIdent (jtColumnA jt), ", ", quoteIdent (jtColumnB jt)
+  , ") select ?, ? where not exists (select 1 from ", quoteIdent (jtTable jt)
+  , " where ", if allowDups then "true or " else ""
+  , quoteIdent (jtColumnA jt), " = ? and ", quoteIdent (jtColumnB jt), " = ?"
+  ]
+
+defaultjtRemoveQuery :: JoinTableInfo a b -> Query
+defaultjtRemoveQuery jt = Query $ S.concat [
+  "delete from ", quoteIdent (jtTable jt), " where "
+  , quoteIdent (jtColumnA jt), " = ? and "
+  , quoteIdent (jtColumnB jt), " = ?"
+  ]
 
 -- | To make two 'Model's an instance of the @Joinable@ class, you
 -- must manually specify the 'joinTable'.  There are three convenient
@@ -160,9 +193,9 @@ defaultjtLookupQuery jt = Query $ S.concat [
 -- @
 class (Model a, Model b) => Joinable a b where
   joinTable :: JoinTableInfo a b
-  joinQueryTemplate :: JoinTableQueries a b
-  {-# INLINE joinQueryTemplate #-}
-  joinQueryTemplate = defaultJoinTableQueries $ joinTable
+  joinTableQueries :: JoinTableQueries a b
+  {-# INLINE joinTableQueries #-}
+  joinTableQueries = defaultJoinTableQueries $ joinTable
 
 joinTableInfoModels :: (Model a, Model b) =>
                        JoinTableInfo a b -> (ModelInfo a, ModelInfo b)
@@ -176,7 +209,7 @@ joinDefault = jti
         jti = JoinTableInfo {
             jtTable = S.intercalate "_" $
                           sort [modelTable a, modelTable b]
-          , jtAllowUpdates = True
+          , jtAllowModification = True
           , jtColumnA = S.concat [modelTable a, "_", keya]
           , jtKeyA = keya
           , jtColumnB = S.concat [modelTable b, "_", keyb]
@@ -186,14 +219,15 @@ joinDefault = jti
 
 
 flipJoinTableInfo :: JoinTableInfo a b -> JoinTableInfo b a
-flipJoinTableInfo jt = JoinTableInfo { jtTable = jtTable jt
-                                     , jtAllowUpdates = jtAllowUpdates jt
-                                     , jtColumnA = jtColumnB jt
-                                     , jtKeyA = jtKeyB jt
-                                     , jtColumnB = jtColumnA jt
-                                     , jtKeyB = jtKeyA jt
-                                     , jtDummy = DummyForRetainingTypes
-                                     }
+flipJoinTableInfo jt = JoinTableInfo {
+    jtTable = jtTable jt
+  , jtAllowModification = jtAllowModification jt
+  , jtColumnA = jtColumnB jt
+  , jtKeyA = jtKeyB jt
+  , jtColumnB = jtColumnA jt
+  , jtKeyB = jtKeyA jt
+  , jtDummy = DummyForRetainingTypes
+  }
 
 joinReverse :: (Joinable a b) => JoinTableInfo b a
 joinReverse = flipJoinTableInfo joinTable
@@ -210,7 +244,7 @@ joinThroughModelInfo jt = jti
         (a, b) = joinTableInfoModels jti
         jti = JoinTableInfo {
             jtTable = modelTable jt
-          , jtAllowUpdates = True
+          , jtAllowModification = False
           , jtColumnA = modelColumns jt !!
                         getMaybeFieldPos (poptycon jt) (dummyRef a)
           , jtKeyA = modelColumns a !! modelPrimaryColumn a
@@ -232,7 +266,7 @@ jtJoinOf JoinTableQueries{ jtLookupQuery = q } conn a =
   map lookupRow <$> query conn q (Only $ primaryKey a)
 
 findJoin :: (Joinable a b) => Connection -> a -> IO [b]
-findJoin = jtJoinOf joinQueryTemplate
+findJoin = jtJoinOf joinTableQueries
 
 
 
@@ -277,6 +311,7 @@ bar :: Bar
 bar = Bar NullKey 77 "hi" (Just $ DBRef 3)
 
 instance Joinable Foo Bar where
-  joinTable = (joinThroughModel (undefined :: Joiner)) { jtAllowUpdates = True }
+  joinTable = (joinThroughModel (undefined :: Joiner)) {
+    jtAllowModification = True }
 
 instance HasOne Bar Bar

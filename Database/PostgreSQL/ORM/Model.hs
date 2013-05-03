@@ -22,6 +22,7 @@ module Database.PostgreSQL.ORM.Model (
     , defaultModelInsertQuery, defaultModelDeleteQuery
       -- * Helper functions and miscellaneous internals
     , quoteIdent, ShowRefType(..), NormalRef(..), UniqueRef(..)
+    , printq
       -- * Low-level functions for generic FromRow/ToRow
     , GFromRow(..), defaultFromRow, GToRow(..), defaultToRow
     ) where
@@ -611,3 +612,6 @@ destroy c a =
 destroyByRef :: (Model a) => Connection -> GDBRef rt a -> IO ()
 destroyByRef c a =
   void $ execute c (modelDeleteQuery $ gmodelToQueries a) (Only a)
+
+printq :: Query -> IO ()
+printq (Query bs) = S8.putStrLn bs
