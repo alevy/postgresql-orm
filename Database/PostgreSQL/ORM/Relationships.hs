@@ -170,7 +170,7 @@ defaultjtAddQuery allowDups jt = Query $ S.concat [
   , quoteIdent (jtColumnA jt), ", ", quoteIdent (jtColumnB jt)
   , ") select ?, ? where not exists (select 1 from ", quoteIdent (jtTable jt)
   , " where ", if allowDups then "true or " else ""
-  , quoteIdent (jtColumnA jt), " = ? and ", quoteIdent (jtColumnB jt), " = ?"
+  , quoteIdent (jtColumnA jt), " = ? and ", quoteIdent (jtColumnB jt), " = ?)"
   ]
 
 defaultjtRemoveQuery :: JoinTableInfo a b -> Query
@@ -268,7 +268,16 @@ jtJoinOf JoinTableQueries{ jtLookupQuery = q } conn a =
 findJoin :: (Joinable a b) => Connection -> a -> IO [b]
 findJoin = jtJoinOf joinTableQueries
 
+modelsToJTQ :: (Joinable a b) => a -> b -> JoinTableQueries a b
+modelsToJTQ _ _ = joinTableQueries
 
+addJoin :: (Joinable a b) => Connection -> a -> b -> IO Int64
+addJoin c a b = execute c (jtAddQuery $ modelsToJTQ a b)
+                (primaryKey a, primaryKey b, primaryKey a, primaryKey b)
+
+removeJoin :: (Joinable a b) => Connection -> a -> b -> IO Int64
+removeJoin c a b = execute c (jtRemoveQuery $ modelsToJTQ a b)
+                   (primaryKey a, primaryKey b)
 
 
 {-
@@ -313,5 +322,7 @@ bar = Bar NullKey 77 "hi" (Just $ DBRef 3)
 instance Joinable Foo Bar where
   joinTable = (joinThroughModel (undefined :: Joiner)) {
     jtAllowModification = True }
+instance Joinable Bar Foo where
+  joinTable = joinReverse
 
 instance HasOne Bar Bar
