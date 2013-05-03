@@ -15,9 +15,10 @@ library
   ghc-options: -Wall
   exposed-modules: Data.HasField
                  , Data.RequireSelector
-                 , Database.PostgreSQL.ORM.Fields
+                 , Database.PostgreSQL.ORM.CreateTable
                  , Database.PostgreSQL.ORM.Model
                  , Database.PostgreSQL.ORM.Relationships
+                 , Database.PostgreSQL.ORM.SqlType
   other-extensions: FlexibleContexts
                   , FlexibleInstances
                   , FunctionalDependencies
