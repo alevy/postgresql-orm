@@ -67,14 +67,14 @@ dbRefToInfo :: (Model t) => GDBRef rt t -> ModelInfo t
 dbRefToInfo _ = modelInfo
 
 instance (Model a) => SqlType (DBRef a) where
-  sqlBaseType r@(GDBRef k) = sqlBaseType k <> ref
+  sqlBaseType r@(DBRef k) = sqlBaseType k <> ref
     where t = dbRefToInfo r
           ref = S.concat [
               " references ", quoteIdent (modelTable t) , "("
               , quoteIdent (modelColumns t !! modelPrimaryColumn t), ")" ]
 
 instance (Model a) => SqlType (DBURef a) where
-  sqlBaseType r@(GDBRef k) = sqlBaseType k <> ref
+  sqlBaseType r@(DBRef k) = sqlBaseType k <> ref
     where t = dbRefToInfo r
           ref = S.concat [
               " unique references ", quoteIdent (modelTable t) , "("

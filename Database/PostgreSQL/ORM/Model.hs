@@ -11,7 +11,7 @@ module Database.PostgreSQL.ORM.Model (
     , findKey, findRef, save, destroy, destroyByRef
       -- * Functions for accissing and using Models
     , modelToInfo, gmodelToInfo, modelToQueries, gmodelToQueries
-    , modelName, primaryKey
+    , modelName, primaryKey, modelSelectFragment
     , LookupRow(..), UpdateRow(..), InsertRow(..)
       -- * Low-level functions providing manual access to defaults
     , defaultModelInfo
@@ -107,22 +107,22 @@ isNullKey _       = False
 -- are just type aliases to a generalized reference type @GDBRef@,
 -- where @GDBRef@'s first type argument, @reftype@, is a phantom type
 -- denoting the flavor of reference ('NormalRef' or 'UniqueRef').
-newtype GDBRef reftype table = GDBRef DBKeyType deriving (Typeable)
+newtype GDBRef reftype table = DBRef DBKeyType deriving (Typeable)
 
 -- | Just a hack so that 'show' prints \"'DBRef'\" on a @'GDBRef'
 -- 'NormalRef'@ and \"'DBURef'\" on a @'GDBRef' 'UniqueRef'@.
 class ShowRefType rt where showRefType :: r rt t -> String
 
 instance (ShowRefType rt, Model t) => Show (GDBRef rt t) where
-  showsPrec n r@(GDBRef k) = showParen (n > 10) $
+  showsPrec n r@(DBRef k) = showParen (n > 10) $
     (showRefType r ++) . ("{" ++) . (mname ++) . ("} " ++) . showsPrec 11 k
     where mname = S8.unpack $ modelTable $ gmodelToInfo r
 instance FromField (GDBRef rt t) where
   {-# INLINE fromField #-}
-  fromField f bs = GDBRef <$> fromField f bs
+  fromField f bs = DBRef <$> fromField f bs
 instance ToField (GDBRef rt t) where
   {-# INLINE toField #-}
-  toField (GDBRef k) = toField k
+  toField (DBRef k) = toField k
 
 -- | See 'GDBRef'.
 data NormalRef = NormalRef deriving (Show, Typeable)
@@ -154,7 +154,7 @@ instance ShowRefType UniqueRef where showRefType _ = "DBURef"
 -- storing in a different 'Model'.
 mkDBRef :: (Model a) => a -> GDBRef rt a
 mkDBRef a
-  | (DBKey k) <- primaryKey a = GDBRef k
+  | (DBKey k) <- primaryKey a = DBRef k
   | otherwise = error $ "mkDBRef " ++ S8.unpack (modelName a) ++ ": NullKey"
 
 
@@ -379,10 +379,16 @@ fmtCols :: Bool -> [S.ByteString] -> S.ByteString
 fmtCols False cs = S.intercalate ", " (map q cs)
 fmtCols True cs = "(" <> fmtCols False cs <> ")"
 
+-- | Generate a SQL @SELECT@ statement with no @WHERE@ predicate.  For
+-- example, 'defaultModelLookupQuery' consists of
+-- @modelSelectFragment@ followed by \"@WHERE@ /primary-key/ = ?\".
+modelSelectFragment :: ModelInfo a -> S.ByteString
+modelSelectFragment mi = S.concat [
+  "select ", fmtCols False (modelColumns mi), " from ", q (modelTable mi) ]
 
 defaultModelLookupQuery :: ModelInfo a -> Query
 defaultModelLookupQuery mi = Query $ S.concat [
-  "select ", fmtCols False (modelColumns mi), " from ", q (modelTable mi)
+    modelSelectFragment mi
   , " where ", q (modelColumns mi !! modelPrimaryColumn mi), " = ?"
   ]
 
@@ -570,7 +576,7 @@ findKey c k = action
 -- | Follow a 'DBRef' or 'DBURef' and fetch the target row from the
 -- database into a 'Model' type @r@.
 findRef :: (Model r) => Connection -> GDBRef rt r -> IO (Maybe r)
-findRef c (GDBRef k) = findKey c (DBKey k)
+findRef c (DBRef k) = findKey c (DBKey k)
 
 -- | Write a 'Model' to the database.  If the primary key is
 -- 'NullKey', the item is written with an @INSERT@ query, read back

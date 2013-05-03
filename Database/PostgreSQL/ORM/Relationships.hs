@@ -8,7 +8,7 @@
 module Database.PostgreSQL.ORM.Relationships where
 
 import qualified Data.ByteString as S
-import qualified Data.ByteString.Char8 as S8
+-- import qualified Data.ByteString.Char8 as S8
 import Data.Functor
 import Data.List
 import Data.Maybe
@@ -22,93 +22,87 @@ import Database.PostgreSQL.ORM.Model
 import GHC.Generics
 import Data.Int
 
-data DBRefInfo r child parent = DBRefInfo {
-    dbrefColumn :: !Int
-  , dbrefSelector :: !(child -> r parent)
-  , dbrefQuery :: !Query
+data DBRefInfo reftype child parent = DBRefInfo {
+    dbrefSelector :: !(child -> GDBRef reftype parent)
+    -- ^ Field selector returning a reference.
+  , dbrefColumn :: !S.ByteString
+    -- ^ Name of the database column storing the reference.
   }
-instance (Model child) => Show (DBRefInfo r child parent) where
-  show rd = "DBRefInfo " ++ show c ++ " " ++
-            S8.unpack (modelColumns mi !! c) ++ " " ++
-            show (dbrefQuery rd)
-    where c = dbrefColumn rd
-          getmi :: (Model c) => DBRefInfo r c parent -> ModelInfo c
-          getmi _ = modelInfo
-          mi = getmi rd
 
-defaultDBRefInfo :: (Model child
-                    , HasMaybeField child (r parent)) =>
-                    DBRefInfo r child parent
-defaultDBRefInfo = rd
-  where getTypes :: DBRefInfo r child parent -> (child, r parent)
-        getTypes _ = (undefined, undefined)
-        (c, rh) = getTypes rd
-        cols = modelColumns $ modelToInfo c
-        colno = getMaybeFieldPos c rh
-        qstr = S.concat [
-          "select "
-          , S.intercalate ", " (map quoteIdent cols)
-          , " from ", quoteIdent (modelName c), " where "
-          , quoteIdent (cols !! colno), " = ?"]
-        rd = DBRefInfo {
-            dbrefColumn = colno
-          , dbrefSelector = fromJust . getMaybeFieldVal
-          , dbrefQuery = Query qstr
+instance Show (DBRefInfo rt c p) where
+  show ri = "DBRefInfo ? " ++ show (dbrefColumn ri)
+
+newtype DBRefQuery reftype child parent = DBRefQuery {
+  dbrefQuery :: Query
+  } deriving (Show)
+
+defaultDBRefInfo :: (Model child, HasMaybeField child (GDBRef rt parent)) =>
+                    rt -> DBRefInfo rt child parent
+defaultDBRefInfo _ = ri
+  where c = (undefined :: DBRefInfo rt c p -> c) ri
+        rp = (undefined :: DBRefInfo rt c p -> GDBRef rt p) ri
+        ri = DBRefInfo {
+            dbrefSelector = fromJust . getMaybeFieldVal
+          , dbrefColumn = modelColumns (modelToInfo c) !! getMaybeFieldPos c rp
           }
 
-getParentRef :: (HasMaybeField child (GDBRef rt parent)) =>
-                rt -> child -> DBRef parent
-getParentRef rt c = forcert rt $ fromJust $ getMaybeFieldVal c
-  where forcert :: rt -> GDBRef rt parent -> DBRef parent
-        forcert _ (GDBRef k) = GDBRef k
-
-class (Model parent, Model child) => HasOne parent child where
-  hasOneInfo :: DBRefInfo DBURef child parent
-  default hasOneInfo :: (Model child
-                        , HasMaybeField child (DBURef parent)) =>
-                        DBRefInfo DBURef child parent
-  {-# INLINE hasOneInfo #-}
-  hasOneInfo = defaultDBRefInfo
+defaultChildQuery :: (Model child) =>
+                     DBRefInfo rt child parent -> DBRefQuery rt child parent
+defaultChildQuery ri = DBRefQuery $ Query $ S.concat [
+  modelSelectFragment c, " where ", quoteIdent (dbrefColumn ri), " = ?"]
+  where c = (const modelInfo :: Model c => DBRefInfo rt c p -> ModelInfo c) ri
 
 class (Model parent, Model child) => HasMany parent child where
-  hasManyInfo :: DBRefInfo DBRef child parent
-  default hasManyInfo :: (Model child
-                         , HasMaybeField child (DBRef parent)) =>
-                         DBRefInfo DBRef child parent
+  hasManyInfo :: DBRefInfo NormalRef child parent
+  default hasManyInfo :: (HasMaybeField child (GDBRef NormalRef parent)) =>
+                         DBRefInfo NormalRef child parent
   {-# INLINE hasManyInfo #-}
-  hasManyInfo = defaultDBRefInfo
+  hasManyInfo = defaultDBRefInfo NormalRef
+  hasManyQuery :: DBRefQuery NormalRef child parent
+  {-# INLINE hasManyQuery #-}
+  hasManyQuery = defaultChildQuery hasManyInfo
+
+class (Model parent, Model child) => HasOne parent child where
+  hasOneInfo :: DBRefInfo UniqueRef child parent
+  default hasOneInfo :: (HasMaybeField child (GDBRef UniqueRef parent)) =>
+                         DBRefInfo UniqueRef child parent
+  {-# INLINE hasOneInfo #-}
+  hasOneInfo = defaultDBRefInfo UniqueRef
+  hasOneQuery :: DBRefQuery UniqueRef child parent
+  {-# INLINE hasOneQuery #-}
+  hasOneQuery = defaultChildQuery hasOneInfo
+
+getParentKey :: DBRefInfo rt c p -> c -> DBRef p
+getParentKey ri c = case dbrefSelector ri c of DBRef k -> DBRef k
 
 -- | The default only works for 'HasMany' relationships.  For 'HasOne'
 -- (meaning the field is of type 'DBURef' instead of 'DBRef'), you
 -- will need to say:
 --
 -- > instance HasParent Child Parent where
--- >     parentRef = getParentRef UniqueRef
---
-class (Model parent) => HasParent child parent where
-  parentRef :: child -> DBRef parent
-  default parentRef :: (HasMaybeField child (DBRef parent)) =>
-                       child -> DBRef parent
-  parentRef = getParentRef NormalRef
+-- >     parentKey = getParentKey hasOneInfo
+class (Model child, Model parent) => HasParent child parent where
+  parentKey :: child -> DBRef parent
+  default parentKey :: (HasMany parent child) => child -> DBRef parent
+  parentKey = getParentKey hasManyInfo
 
 rdChildrenOf :: (Model child, Model parent) =>
-                DBRefInfo (GDBRef rt) child parent -> Connection -> parent
-                -> IO [child]
-rdChildrenOf rd conn p =
-  map lookupRow <$> query conn (dbrefQuery rd) (Only $ primaryKey p)
+                DBRefQuery rt child parent -> Connection -> parent -> IO [child]
+rdChildrenOf (DBRefQuery q) conn p =
+  map lookupRow <$> query conn q (Only $ primaryKey p)
 
 findOne :: (HasOne parent child) => Connection -> parent -> IO (Maybe child)
 findOne c p = do
-  rs <- rdChildrenOf hasOneInfo c p
+  rs <- rdChildrenOf hasOneQuery c p
   case rs of [r] -> return $ Just r
              _   -> return Nothing
 
 findMany :: (HasMany parent child) => Connection -> parent -> IO [child]
-findMany = rdChildrenOf hasManyInfo
+findMany = rdChildrenOf hasManyQuery
 
 findParent :: (HasParent child parent) =>
               Connection -> child -> IO (Maybe parent)
-findParent conn child = findRef conn (parentRef child)
+findParent conn child = findRef conn (parentKey child)
 
 
 data DummyForRetainingTypes a b = DummyForRetainingTypes
@@ -271,7 +265,7 @@ data Joiner = Joiner {
 instance Model Joiner
 
 bar :: Bar
-bar = Bar NullKey 77 "hi" (Just $ GDBRef 3)
+bar = Bar NullKey 77 "hi" (Just $ DBRef 3)
 
 instance Joinable Foo Bar where
   joinTable = (joinThroughModel (undefined :: Joiner)) { jtAllowUpdates = True }
