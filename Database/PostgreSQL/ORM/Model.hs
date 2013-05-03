@@ -12,7 +12,7 @@ module Database.PostgreSQL.ORM.Model (
     , LookupRow(..), UpdateRow(..), InsertRow(..)
       -- * Database operations
     , findKey, findRef, save, destroy, destroyByRef
-      -- * Low-level functions providing piecemeal access to defaults
+      -- * Low-level functions providing manual access to defaults
     , defaultModelInfo
     , defaultModelTable, defaultModelColumns, defaultModelGetPrimaryKey
     , defaultModelRead, defaultModelWrite
@@ -81,10 +81,11 @@ instance Ord DBKey where
 
 instance Show DBKey where
   showsPrec n (DBKey k) = showsPrec n k
-  showsPrec _ NullKey   = ("null" ++)
+  showsPrec _ NullKey   = ("NullKey" ++)
 instance Read DBKey where
   readsPrec n s = case readsPrec n s of
-    [] | [("null", r)] <- lex s -> [(NullKey, r)]
+    -- Commenting out following line less correct, but maybe more secure
+    -- [] | [("null", r)] <- lex s -> [(NullKey, r)]
     kr -> map (\(k, r) -> (DBKey k, r)) kr
 
 instance FromField DBKey where
@@ -107,6 +108,8 @@ isNullKey _       = False
 -- denoting the flavor of reference ('NormalRef' or 'UniqueRef').
 newtype GDBRef reftype table = GDBRef DBKeyType deriving (Typeable)
 
+-- | Just a hack so that 'show' prints \"'DBRef'\" on a @'GDBRef'
+-- 'NormalRef'@ and \"'DBURef'\" on a @'GDBRef' 'UniqueRef'@.
 class ShowRefType rt where showRefType :: r rt t -> String
 
 instance (ShowRefType rt, Model t) => Show (GDBRef rt t) where
@@ -120,6 +123,7 @@ instance ToField (GDBRef rt t) where
   {-# INLINE toField #-}
   toField (GDBRef k) = toField k
 
+-- | See 'GDBRef'.
 data NormalRef = NormalRef deriving (Show, Typeable)
 -- | The type @DBRef MyDatabaseTable@ references an instance of the
 -- @MyDatabaseTable@ 'Model' by its primary key.  The type argument
@@ -128,6 +132,7 @@ data NormalRef = NormalRef deriving (Show, Typeable)
 type DBRef = GDBRef NormalRef
 instance ShowRefType NormalRef where showRefType _ = "DBRef"
 
+-- | See 'GDBRef'.
 data UniqueRef = UniqueRef deriving (Show, Typeable)
 -- | A @DBURef MyDatabaseTable@ is like a @'DBRef' MyDatabaseTable@,
 -- but with an added uniqeuness constraint.  In other words, if type
@@ -148,11 +153,16 @@ mkDBRef a
 
 
 
--- | Every 'Model' has a @ModelInfo@ structure associated with it.
+-- | A @ModelInfo T@ contains all of the information necessary for
+-- converting type @T@ to and from database rows.  Each @'Model'@ type
+-- has a single @ModelInfo@ associated with it, accessible through the
+-- 'modelInfo' method.
 data ModelInfo a = Model {
     modelTable :: !S.ByteString
     -- ^ The name of the database table corresponding to this model.
-    -- The default is the same as the type name.
+    -- The default is the same as the type name, unless the first
+    -- letter is the only capital letter, in which case the first
+    -- letter is downcased.
   , modelColumns :: ![S.ByteString]
     -- ^ The name of columns in the database table that corresponds to
     -- this model.  The column names should appear in the order that the
@@ -180,6 +190,13 @@ class GDatatypeName f where
   gDatatypeName :: f p -> String
 instance (Datatype c) => GDatatypeName (M1 i c f) where 
   gDatatypeName a = datatypeName a
+-- | The default name of the database table corresponding to a Haskell
+-- type.  The default is the same as the type name, unless the first
+-- letter is the only capital letter, in which case the first letter
+-- is downcased.  (The rationale is that Haskell requires a
+-- capitalized letter, but all-lower-case table names are slightly
+-- easier to manipulate manually in PostgreSQL because they require
+-- less quoting.)
 defaultModelTable :: (Generic a, GDatatypeName (Rep a)) => a -> S.ByteString
 defaultModelTable = fromString . maybeFold. gDatatypeName . from
   where maybeFold s | h:t <- s, not (any isUpper t) = toLower h:t
@@ -197,6 +214,7 @@ instance (GColumns f) => GColumns (M1 C c f) where
   gColumns ~(M1 fp) = gColumns fp
 instance (GColumns f) => GColumns (M1 D c f) where
   gColumns ~(M1 fp) = gColumns fp
+-- | Returns the Haskell field names in a data structure.
 defaultModelColumns :: (Generic a, GColumns (Rep a)) => a -> [S.ByteString]
 defaultModelColumns = gColumns . from
 
@@ -235,6 +253,9 @@ instance (GFromRow f) => GFromRow (M1 i c f) where
 defaultFromRow :: (Generic a, GFromRow (Rep a)) => RowParser a
 defaultFromRow = to <$> gFromRow
 
+-- | Returns a 'RowParser' that parses each field of a data structure
+-- in the order of the Haskell data type definition.  Each field must
+-- be an instance of 'FromField'.
 defaultModelRead :: (Generic a, GFromRow (Rep a)) => RowParser a
 defaultModelRead = defaultFromRow
 
@@ -257,13 +278,31 @@ deleteAt 0 (_:t) = t
 deleteAt n (h:t) = h:deleteAt (n-1) t
 deleteAt _ _     = []
 
+-- | Returns a series of 'Action's serializing each field of a data
+-- structure (in the order of the Haskell datatype definition),
+-- /except/ the primary key, since the primary key should never be
+-- written to a database.  Every field must be an instance of
+-- 'ToField'.
+
+-- The fist argument is the 0-based index of the primary key (which
+-- should almost always be 0).  If for some reason you don't want to
+-- skip the primary key, use 'defaultToRow' to marshall the full row,
+-- but that probably isn't what you want.
 defaultModelWrite :: (Generic a, GToRow (Rep a)) =>
                      Int        -- ^ Field number of the primary key
                      -> a       -- ^ Model to write
                      -> [Action] -- ^ Writes all fields except primary key
 defaultModelWrite pki = deleteAt pki . defaultToRow
 
-
+-- | The default definition of 'modelInfo'.  See the documentation at
+-- 'Model' for more information.
+--
+-- Defaults for the individual fields are available in separate
+-- functions (e.g., 'defaultModelTable') with fewer class
+-- requirements, in case you want to make piecemeal use of defaults.
+-- The default for 'modelPrimaryColumn' is 0.  If you overwrite that,
+-- you will need to overwrite 'modelGetPrimaryKey' as well (and likely
+-- vice versa).
 defaultModelInfo :: (Generic a, GToRow (Rep a), GFromRow (Rep a)
                     , GPrimaryKey0 (Rep a), GColumns (Rep a)
                     , GDatatypeName (Rep a)) => ModelInfo a
@@ -301,6 +340,11 @@ data ModelQueries a = ModelQueries {
     -- The query paremeter is the primary key of the row to delete.
   } deriving (Show)
 
+-- | Quote a SQL identifier (such as a column or field name) with
+-- double quotes.  Note this has nothing to do with quoting /values/,
+-- which must be quoted using single quotes.  (Anyway, all values
+-- should be passed as query parameters, meaning @postgresql-simple@
+-- will handle quoting them.)
 quoteIdent :: S.ByteString -> S.ByteString
 quoteIdent iden = S8.pack $ '"' : (go $ S8.unpack iden)
   where go ('"':cs) = '"':'"':go cs
@@ -346,6 +390,7 @@ defaultModelDeleteQuery mi = Query $ S.concat [
   , q (modelColumns mi !! modelPrimaryColumn mi), " = ?"
   ]
 
+-- | The default value of 'modelQueries'.
 defaultModelQueries :: ModelInfo a -> ModelQueries a
 defaultModelQueries mi = ModelQueries {
     modelLookupQuery = defaultModelLookupQuery mi
@@ -475,6 +520,10 @@ newtype UpdateRow a = UpdateRow a deriving (Show, Typeable)
 instance (Model a) => ToRow (UpdateRow a) where
   toRow (UpdateRow a) = toRow $ InsertRow a :. Only (primaryKey a)
 
+-- | Fetch a row from the database by its primary key and convert it
+-- to a 'Model' of type @r@.  The @DBKey@ presumably comes from an
+-- external source (e.g., it was parsed using 'read' from a query
+-- parameter in a URL), otherwise you probably want 'findRef'.
 findKey :: (Model r) => Connection -> DBKey -> IO (Maybe r)
 findKey _ NullKey = error "findKey: NullKey"
 findKey c k = action
@@ -485,6 +534,8 @@ findKey c k = action
                     case rs of [r] -> return $ Just $ lookupRow $ r
                                _   -> return Nothing
 
+-- | Follow a 'DBRef' or 'DBURef' and fetch the target row from the
+-- database into a 'Model' type @r@.
 findRef :: (Model r) => Connection -> GDBRef rt r -> IO (Maybe r)
 findRef c (GDBRef k) = findKey c (DBKey k)
 
@@ -505,10 +556,17 @@ save c r | NullKey <- primaryKey r = do
                                      ++ " records"
   where qs = modelToQueries r
 
+-- | Remove the row corresponding to a particular data structure from
+-- the database.  This function only looks at the primary key in the
+-- data structure.  It is an error to call this function if the
+-- primary key is not set.
+destroy :: (Model a) => Connection -> a -> IO ()
+destroy c a =
+  case primaryKey a of
+    NullKey -> fail "destroy: NullKey"
+    DBKey k -> void $ execute c (modelDeleteQuery $ modelToQueries a) (Only k)
+
+-- | Remove a row from the database without fetching it first.
 destroyByRef :: (Model a) => Connection -> GDBRef rt a -> IO ()
 destroyByRef c a =
   void $ execute c (modelDeleteQuery $ gmodelToQueries a) (Only a)
-
-destroy :: (Model a) => Connection -> a -> IO ()
-destroy c a =
-  void $ execute c (modelDeleteQuery $ modelToQueries a) (Only $ primaryKey a)
