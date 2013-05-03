@@ -12,9 +12,11 @@ library
                , postgresql-simple
                , text
                , time
+               , unix
   ghc-options: -Wall
   exposed-modules: Data.HasField
                  , Data.RequireSelector
+                 , Database.PostgreSQL.Devel
                  , Database.PostgreSQL.ORM.CreateTable
                  , Database.PostgreSQL.ORM.Model
                  , Database.PostgreSQL.ORM.Relationships
