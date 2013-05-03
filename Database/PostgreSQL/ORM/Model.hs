@@ -249,53 +249,43 @@ fmtCols False cs = S.intercalate ", " (map q cs)
 fmtCols True cs = "(" <> fmtCols False cs <> ")"
 
 
-defaultModelLookupQuery :: S.ByteString -- ^ Name of database table
-                           -> [S.ByteString] -- ^ Names of columns
-                           -> Int            -- ^ Index of primary key field
-                           -> Query
-defaultModelLookupQuery t cs pki = Query $ S.concat [
-  "select ", fmtCols False cs, " from ", q t, " where ", q (cs !! pki), " = ?"
+defaultModelLookupQuery :: ModelInfo a -> Query
+defaultModelLookupQuery mi = Query $ S.concat [
+  "select ", fmtCols False (modelColumns mi), " from ", q (modelInfoName mi)
+  , " where ", q (modelColumns mi !! modelPrimaryColumn mi), " = ?"
   ]
 
-defaultModelUpdateQuery :: S.ByteString -- ^ Name of database table
-                           -> [S.ByteString] -- ^ Names of columns
-                           -> Int            -- ^ Index of primary key field
-                           -> Query
-defaultModelUpdateQuery t cs pki = Query $ S.concat [
-    "update ", q t, " set "
+defaultModelUpdateQuery :: ModelInfo a -> Query
+defaultModelUpdateQuery mi = Query $ S.concat [
+    "update ", q (modelInfoName mi), " set "
     , S.intercalate ", " (map (\c -> q c <> " = ?") $ deleteAt pki cs)
     , " where ", q (cs !! pki), " = ?"
   ]
+  where cs = modelColumns mi                        
+        pki = modelPrimaryColumn mi
 
-defaultModelInsertQuery :: S.ByteString -- ^ Name of database table
-                           -> [S.ByteString] -- ^ Names of columns
-                           -> Int            -- ^ Index of primary key field
-                           -> Query
-defaultModelInsertQuery t cs0 pki = Query $ S.concat $ [
-  "insert into ", q t, " ", fmtCols True cs1, " values ("
+defaultModelInsertQuery :: ModelInfo a -> Query
+defaultModelInsertQuery mi = Query $ S.concat $ [
+  "insert into ", q (modelInfoName mi), " ", fmtCols True cs1, " values ("
   , S.intercalate ", " $ map (const "?") cs1
   , ") returning ", fmtCols False cs0
   ]
-  where cs1 = deleteAt pki cs0
+  where cs0 = modelColumns mi
+        cs1 = deleteAt (modelPrimaryColumn mi) cs0
 
-defaultModelDeleteQuery :: S.ByteString -- ^ Name of database table
-                           -> [S.ByteString] -- ^ Names of columns
-                           -> Int            -- ^ Index of primary key field
-                           -> Query
-defaultModelDeleteQuery t cs pki = Query $ S.concat [
-  "delete from ", q t, " where ", q (cs !! pki), " = ?"
+defaultModelDeleteQuery :: ModelInfo a -> Query
+defaultModelDeleteQuery mi = Query $ S.concat [
+  "delete from ", q (modelInfoName mi), " where "
+  , q (modelColumns mi !! modelPrimaryColumn mi), " = ?"
   ]
 
 defaultModelQueries :: ModelInfo a -> ModelQueries a
 defaultModelQueries mi = ModelQueries {
-    modelLookupQuery = defaultModelLookupQuery mname cols pki
-  , modelInsertQuery = defaultModelInsertQuery mname cols pki
-  , modelUpdateQuery = defaultModelUpdateQuery mname cols pki
-  , modelDeleteQuery = defaultModelDeleteQuery mname cols pki
+    modelLookupQuery = defaultModelLookupQuery mi
+  , modelUpdateQuery = defaultModelUpdateQuery mi
+  , modelInsertQuery = defaultModelInsertQuery mi
+  , modelDeleteQuery = defaultModelDeleteQuery mi
   }
-  where mname = modelInfoName mi
-        cols = modelColumns mi
-        pki = modelPrimaryColumn mi
 
 
 -- | Class of data types representing a database table.  Provides a
