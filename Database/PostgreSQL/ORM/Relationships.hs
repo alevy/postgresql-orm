@@ -194,15 +194,40 @@ defaultjtRemoveQuery jt = Query $ S.concat [
   ]
 
 -- | To make two 'Model's an instance of the @Joinable@ class, you
--- must manually specify the 'joinTable'.  There are three convenient
--- defaults for doing this:
+-- must manually specify the 'joinTable'.  There are three pre-defined
+-- functions for creating joint tables:  'joinDefault', joinReverse',
+-- and 'joinThroughModel'.
 --
--- @instance Joinable A B where joinTable = 'joinDefault'
+-- * 'joinDefault' creates a @Joinable@ instance assuming a simple
+--    external join table with two columns, one for the primary key of
+--    each type being joined.
 --
--- instance Joinable A B where joinTable = 'joinReverse'
+-- * 'joinReverse' assumes a @Joinable@ relation already exists in the
+--   other direction, and simply reverses it.  Generally you will use
+--   'joinReverse' in conjunction with one of the other two.
 --
+-- * 'joinThroughModel' assumes that the join table is actually a
+--   'Model' in which rows contain other information (such as a
+--   primary key).  For this to work, the model used as a join table
+--   must include two 'DBRef' fields, one for each of the models being
+--   joined.
+--
+-- An example of declaring a simple join table is:
+--
+-- @
+-- instance Joinable A B where 'joinTable' = 'joinDefault'
+-- instance Joinable B A where 'joinTable' = 'joinReverse'
+-- @
+--
+-- An example of using some 'Model' @C@ as the join table (assuming
+-- @C@ contains a @'DBRef' A@ and a @'DBRef' B@, or 'Maybe' versions
+-- of these types):
+--
+-- @
 -- instance Joinable A B where
---     joinTable = 'joinThroughModel' (modelInfo :: ModelInfo C)
+--     'joinTable' = 'joinThroughModel' ('undefined' :: C)
+-- instance Joinable B A where
+--     'joinTable' = 'joinReverse'
 -- @
 class (Model a, Model b) => Joinable a b where
   joinTable :: JoinTableInfo a b
