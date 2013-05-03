@@ -135,15 +135,15 @@ mkJoinQueryTemplate :: (Model a, Model b) =>
                        JoinTableInfo a b -> JoinQueryTemplate a b
 mkJoinQueryTemplate jt = JoinQueryTemplate $ Query $ S.concat [
     "select ", qcols b, " from "
-  , quoteIdent (jtTable jt), " join ", quoteIdent (modelInfoName b)
+  , quoteIdent (jtTable jt), " join ", quoteIdent (modelTable b)
   , " on ", quoteIdent (jtTable jt), ".", quoteIdent (jtColumnB jt)
-  , " = ", quoteIdent (modelInfoName b), ".", quoteIdent (jtKeyB jt)
+  , " = ", quoteIdent (modelTable b), ".", quoteIdent (jtKeyB jt)
   , " where ", quoteIdent (jtTable jt), ".", quoteIdent (jtColumnA jt)
   , " = ?"
   ]
   where (_, b) = joinTableInfoModels jt
         qcols mi = S.intercalate ", " $ map qcol $ modelColumns mi
-          where qname = quoteIdent $ modelInfoName mi
+          where qname = quoteIdent $ modelTable mi
                 qcol c = qname <> "." <> quoteIdent c
 
 -- | To make two 'Model's an instance of the @Joinable@ class, you
@@ -174,11 +174,11 @@ joinDefault = jti
         keyb = modelColumns b !! modelPrimaryColumn b
         jti = JoinTableInfo {
             jtTable = S.intercalate "_" $
-                          sort [modelInfoName a, modelInfoName b]
+                          sort [modelTable a, modelTable b]
           , jtAllowUpdates = True
-          , jtColumnA = S.concat [modelInfoName a, "_", keya]
+          , jtColumnA = S.concat [modelTable a, "_", keya]
           , jtKeyA = keya
-          , jtColumnB = S.concat [modelInfoName b, "_", keyb]
+          , jtColumnB = S.concat [modelTable b, "_", keyb]
           , jtKeyB = keyb
           , jtDummy = DummyForRetainingTypes
           }
@@ -208,7 +208,7 @@ joinThroughModelInfo jt = jti
         poptycon _ = undefined
         (a, b) = joinTableInfoModels jti
         jti = JoinTableInfo {
-            jtTable = modelInfoName jt
+            jtTable = modelTable jt
           , jtAllowUpdates = True
           , jtColumnA = modelColumns jt !!
                         getMaybeFieldPos (poptycon jt) (dummyRef a)

@@ -70,14 +70,14 @@ instance (Model a) => SqlType (DBRef a) where
   sqlBaseType r@(GDBRef k) = sqlBaseType k <> ref
     where t = dbRefToInfo r
           ref = S.concat [
-              " references ", quoteIdent (modelInfoName t) , "("
+              " references ", quoteIdent (modelTable t) , "("
               , quoteIdent (modelColumns t !! modelPrimaryColumn t), ")" ]
 
 instance (Model a) => SqlType (DBURef a) where
   sqlBaseType r@(GDBRef k) = sqlBaseType k <> ref
     where t = dbRefToInfo r
           ref = S.concat [
-              " unique references ", quoteIdent (modelInfoName t) , "("
+              " unique references ", quoteIdent (modelTable t) , "("
               , quoteIdent (modelColumns t !! modelPrimaryColumn t), ")" ]
 
 class GDefTypes f where
@@ -93,7 +93,7 @@ instance (GDefTypes f) => GDefTypes (M1 i c f) where
 createTableWithTypes :: (Model a, Generic a, GDefTypes (Rep a)) =>
                         [(S.ByteString, S.ByteString)] -> a -> Query
 createTableWithTypes except a = Query $ S.concat [
-  "create table ", quoteIdent $ modelInfoName info, " ("
+  "create table ", quoteIdent $ modelTable info, " ("
   , S.intercalate ", " (go types names), ")"
   ]
   where types = gDefTypes $ from a
@@ -103,7 +103,7 @@ createTableWithTypes except a = Query $ S.concat [
           | Just t' <- lookup n except = quoteIdent n <> " " <> t' : go ts ns
           | otherwise = quoteIdent n <> " " <> t : go ts ns
         go [] [] = []
-        go _ _ = error $ "createTable: " ++ S8.unpack (modelInfoName info)
+        go _ _ = error $ "createTable: " ++ S8.unpack (modelTable info)
                  ++ " has incorrect number of columns"
 
 

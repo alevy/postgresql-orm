@@ -2,17 +2,19 @@
     FlexibleContexts, FlexibleInstances, TypeOperators, OverloadedStrings #-}
 
 module Database.PostgreSQL.ORM.Model (
+      -- * Data types for holding primary keys
     DBKeyType, DBKey(..), isNullKey
+    , DBRef, DBURef, GDBRef(..), mkDBRef
+      -- * The Model class
     , Model(..), ModelInfo(..), ModelQueries(..)
     , modelToInfo, gmodelToInfo, modelToQueries, gmodelToQueries
     , modelName, primaryKey
     , LookupRow(..), UpdateRow(..), InsertRow(..)
-    , GDBRef(..), DBRef, DBURef, mkDBRef
       -- * Database operations
     , findKey, findRef, save, destroy, destroyByRef
       -- * Low-level functions providing piecemeal access to defaults
     , defaultModelInfo
-    , defaultModelInfoName, defaultModelColumns, defaultModelGetPrimaryKey
+    , defaultModelTable, defaultModelColumns, defaultModelGetPrimaryKey
     , defaultModelRead, defaultModelWrite
     , defaultModelQueries
     , defaultModelLookupQuery, defaultModelUpdateQuery
@@ -43,15 +45,31 @@ import GHC.Generics
 
 import Database.PostgreSQL.ORM.RequireSelector
 
--- | The value of keys in the database.
+-- | A type large enough to hold database primary keys.  Do not use
+-- this type directly in your data structures.  Use 'DBKey' to hold a
+-- `Model`'s primary key and 'DBRef' to reference the primary key of
+-- another model.
 type DBKeyType = Int64
 
--- | A datatype representing the primary key of a row in the model.
--- This should be @NullKey@ for a model that is being constructed and
--- has not yet been inserted into the database, and @DBKey@ for a
--- model stored in the database.  A @DBKey@ should be the first field
--- in every 'Model' data structure (otherwise the default 'Model'
--- instance will intentionally cause a compilation error).
+-- | The type of the Haskell data structure field containing a model's
+-- primary key.
+--
+-- Every 'Model' must have exactly one @DBKey@, and the @DBKey@ must
+-- be the `Model`'s very first field in the Haskel data type
+-- definition.  (The ordering is enforced by
+-- 'defaultModelGetPrimaryKey', which, through use of the
+-- @DeriveGeneric@ extension, fails to compile when the first field is
+-- not a @DBKey@.)
+--
+-- Each 'Model' stored in the database should have a unique non-null
+-- primary key.  However, the key is determined at the time the
+-- 'Model' is inserted into the database.  While you are constructing
+-- a new 'Model' to insert, you will not have its key.  Hence, you
+-- should use the value @NullKey@ to let the database chose the key.
+--
+-- If you wish to store a `Model`'s primary key as a reference in
+-- another 'Model', do not copy the 'DBKey' structure.  Use 'mkDBRef'
+-- to convert the `Model`'s primary key to a foreign key reference.
 data DBKey = DBKey !DBKeyType | NullKey deriving (Typeable)
 
 instance Eq DBKey where
@@ -76,14 +94,63 @@ instance ToField DBKey where
   toField (DBKey k) = toField k
   toField NullKey   = toField Null
 
+-- | Returns 'True' when a 'DBKey' is 'NullKey'.
 isNullKey :: DBKey -> Bool
 isNullKey NullKey = True
 isNullKey _       = False
 
 
+-- | Many operations can take either a 'DBRef' or a 'DBURef' (both of
+-- which consist internally of a 'DBKeyType').  Hence, these two types
+-- are just type aliases to a generalized reference type @GDBRef@,
+-- where @GDBRef@'s first type argument, @reftype@, is a phantom type
+-- denoting the flavor of reference ('NormalRef' or 'UniqueRef').
+newtype GDBRef reftype table = GDBRef DBKeyType deriving (Typeable)
+
+class ShowRefType rt where showRefType :: r rt t -> String
+
+instance (ShowRefType rt, Model t) => Show (GDBRef rt t) where
+  showsPrec n r@(GDBRef k) = showParen (n > 10) $
+    (showRefType r ++) . ("{" ++) . (mname ++) . ("} " ++) . showsPrec 11 k
+    where mname = S8.unpack $ modelTable $ gmodelToInfo r
+instance FromField (GDBRef rt t) where
+  {-# INLINE fromField #-}
+  fromField f bs = GDBRef <$> fromField f bs
+instance ToField (GDBRef rt t) where
+  {-# INLINE toField #-}
+  toField (GDBRef k) = toField k
+
+data NormalRef = NormalRef deriving (Show, Typeable)
+-- | The type @DBRef MyDatabaseTable@ references an instance of the
+-- @MyDatabaseTable@ 'Model' by its primary key.  The type argument
+-- (i.e., @MyDatabaseTable@ in this case) should be an instance of
+-- 'Model'.
+type DBRef = GDBRef NormalRef
+instance ShowRefType NormalRef where showRefType _ = "DBRef"
+
+data UniqueRef = UniqueRef deriving (Show, Typeable)
+-- | A @DBURef MyDatabaseTable@ is like a @'DBRef' MyDatabaseTable@,
+-- but with an added uniqeuness constraint.  In other words, if type
+-- @A@ contains a @DBURef B@, then each @B@ has one (or at most one)
+-- @A@ associated with it.  By contrast, if type @A@ contains a
+-- @'DBRef' B@, then each @B@ may be associated with many rows of type
+-- @A@.
+type DBURef = GDBRef UniqueRef
+instance ShowRefType UniqueRef where showRefType _ = "DBURef"
+
+-- | Create a reference to the primary key of a 'Model', suitable for
+-- storing in a different 'Model'.
+mkDBRef :: (Model a) => a -> GDBRef rt a
+mkDBRef a
+  | (DBKey k) <- primaryKey a = GDBRef k
+  | otherwise = error $ "mkDBRef " ++ S8.unpack (modelName a) ++ ": NullKey"
+
+
+
+
 -- | Every 'Model' has a @ModelInfo@ structure associated with it.
 data ModelInfo a = Model {
-    modelInfoName :: !S.ByteString
+    modelTable :: !S.ByteString
     -- ^ The name of the database table corresponding to this model.
     -- The default is the same as the type name.
   , modelColumns :: ![S.ByteString]
@@ -105,7 +172,7 @@ data ModelInfo a = Model {
   }
 
 instance Show (ModelInfo a) where
-  show a = intercalate " " ["Model", show $ modelInfoName a
+  show a = intercalate " " ["Model", show $ modelTable a
                            , show $ modelColumns a, show $ modelPrimaryColumn a
                            , "???"]
 
@@ -113,8 +180,8 @@ class GDatatypeName f where
   gDatatypeName :: f p -> String
 instance (Datatype c) => GDatatypeName (M1 i c f) where 
   gDatatypeName a = datatypeName a
-defaultModelInfoName :: (Generic a, GDatatypeName (Rep a)) => a -> S.ByteString
-defaultModelInfoName = fromString . maybeFold. gDatatypeName . from
+defaultModelTable :: (Generic a, GDatatypeName (Rep a)) => a -> S.ByteString
+defaultModelTable = fromString . maybeFold. gDatatypeName . from
   where maybeFold s | h:t <- s, not (any isUpper t) = toLower h:t
                     | otherwise                     = s
 
@@ -201,7 +268,7 @@ defaultModelInfo :: (Generic a, GToRow (Rep a), GFromRow (Rep a)
                     , GPrimaryKey0 (Rep a), GColumns (Rep a)
                     , GDatatypeName (Rep a)) => ModelInfo a
 defaultModelInfo = m
-  where m = Model { modelInfoName = mname
+  where m = Model { modelTable = mname
                   , modelColumns = cols
                   , modelPrimaryColumn = pki
                   , modelGetPrimaryKey = defaultModelGetPrimaryKey
@@ -211,7 +278,7 @@ defaultModelInfo = m
         unModel :: ModelInfo a -> a
         unModel _ = undefined
         a = unModel m
-        mname = defaultModelInfoName a
+        mname = defaultModelTable a
         pki = 0
         cols = defaultModelColumns a
 
@@ -251,13 +318,13 @@ fmtCols True cs = "(" <> fmtCols False cs <> ")"
 
 defaultModelLookupQuery :: ModelInfo a -> Query
 defaultModelLookupQuery mi = Query $ S.concat [
-  "select ", fmtCols False (modelColumns mi), " from ", q (modelInfoName mi)
+  "select ", fmtCols False (modelColumns mi), " from ", q (modelTable mi)
   , " where ", q (modelColumns mi !! modelPrimaryColumn mi), " = ?"
   ]
 
 defaultModelUpdateQuery :: ModelInfo a -> Query
 defaultModelUpdateQuery mi = Query $ S.concat [
-    "update ", q (modelInfoName mi), " set "
+    "update ", q (modelTable mi), " set "
     , S.intercalate ", " (map (\c -> q c <> " = ?") $ deleteAt pki cs)
     , " where ", q (cs !! pki), " = ?"
   ]
@@ -266,7 +333,7 @@ defaultModelUpdateQuery mi = Query $ S.concat [
 
 defaultModelInsertQuery :: ModelInfo a -> Query
 defaultModelInsertQuery mi = Query $ S.concat $ [
-  "insert into ", q (modelInfoName mi), " ", fmtCols True cs1, " values ("
+  "insert into ", q (modelTable mi), " ", fmtCols True cs1, " values ("
   , S.intercalate ", " $ map (const "?") cs1
   , ") returning ", fmtCols False cs0
   ]
@@ -275,7 +342,7 @@ defaultModelInsertQuery mi = Query $ S.concat $ [
 
 defaultModelDeleteQuery :: ModelInfo a -> Query
 defaultModelDeleteQuery mi = Query $ S.concat [
-  "delete from ", q (modelInfoName mi), " where "
+  "delete from ", q (modelTable mi), " where "
   , q (modelColumns mi !! modelPrimaryColumn mi), " = ?"
   ]
 
@@ -288,30 +355,72 @@ defaultModelQueries mi = ModelQueries {
   }
 
 
--- | Class of data types representing a database table.  Provides a
--- reasonable default implementation for types that are members of the
--- 'Generic' class (using GHC's @DeriveGeneric@ extension), provided
--- two conditions hold:
+-- | The class of data types that represent a database table.  This
+-- class conveys two important pieces of information necessary to load
+-- and save data structures from the database.
+--
+--   * 'modelInfo' provides information about translating between the
+--     Haskell class instance and the database representation, in the
+--     form of a 'ModelInfo' data structure.  Among other things, this
+--     structure specifies the name of the database table, the names
+--     of the database columns corresponding to the Haskell data
+--     structure fields, and how to convert the data structure to and
+--     from database rows.
+--
+--   * 'modelQueries' provides pre-formatted 'Query' templates for
+--     common operations.  The default 'modelQueries' value is
+--     generated from 'modelInfo' and should be suitable for most
+--     cases.  Hence, most @Model@ instances should not specify
+--     'modelQueries' and should instead perform customization in the
+--     definition of 'modelInfo'.
+--
+-- 'modelInfo' itself provides a reasonable default implementation for
+-- types that are members of the 'Generic' class (using GHC's
+-- @DeriveGeneric@ extension), provided two conditions hold:
 --
 --   1. The data type must be defined using record selector syntax.
 --
 --   2. The very first field of the data type must be a 'DBKey' to
---      represent the primary key.  (If the 'DBKey' does not appear
---      first in your source code, right after the opening brace, the
---      default will intentionally fail to compile.)
+--      represent the primary key.  Other orders will cause a
+--      compilation error.
 --
--- All information is encapsulated in a single data type, to make it
--- relatively simple to have alternate patterns.  E.g., instead of:
+-- If both of these conditions hold and your database nameing scheme
+-- follows the default conventions, it is reasonable to leave a
+-- completely empty (default) instance declaration:
 --
+-- >   data MyType = MyType { myKey :: !DBKey
+-- >                        , ...
+-- >                        } deriving (Show, Generic)
 -- >   instance Model MyType
 --
--- You can use:
+-- The default 'modelInfo' method is called 'defaultModelInfo'.  You
+-- may wish to use almost all of the defaults, but tweak a few things.
+-- This is easily accomplished by overriding a few fields of the
+-- default structure.  For example, suppose your database columns use
+-- exactly the same name as your Haskell field names, but the name of
+-- database table is not the same as the name of the Haskell data
+-- type.  You can override the database table name (field
+-- 'modelTable') as follows:
+--
+-- >   instance Model MyType where
+-- >       modelInfo = defaultModelInfo { modelTable = "my_type" }
+--
+-- Finally, if you dislike the conventions followed by
+-- 'defaultModelInfo', you can simply implement an alternate pattern,
+-- say @someOtherPattern@, and use it in place of the default:
 --
 -- >   instance Model MyType where modelInfo = someOtherPattern
 --
--- Provided you defined your own @someOtherPattern@ function (possibly
--- using some of the low-level defaults in this file).
+-- You can implement @someOtherPattern@ in terms of
+-- 'defaultModelInfo', or use some of the lower-level functions from
+-- which 'defaultModelInfo' is built.  Each component default function
+-- is separately exposed (e.g., 'defaultModelTable',
+-- 'defaultModelColumns', 'defaultModelGetPrimaryKey', etc.).
 --
+-- The default queries are simiarly provided by a default function
+-- 'defaultModelQueries', whose individual component functions are
+-- exposed ('defaultModelLookupQuery', etc.).  However, customizing
+-- the queries is not recommended.
 class Model a where
   modelInfo :: ModelInfo a
   default modelInfo :: (Generic a, GToRow (Rep a), GFromRow (Rep a)
@@ -340,47 +449,11 @@ gmodelToQueries _ = modelQueries
 
 modelName :: (Model a) => a -> S.ByteString
 {-# INLINE modelName #-}
-modelName = modelInfoName . modelToInfo
+modelName = modelTable . modelToInfo
 
 primaryKey :: (Model a) => a -> DBKey
 {-# INLINE primaryKey #-}
 primaryKey a = modelGetPrimaryKey modelInfo a
-
-newtype GDBRef reftype table = GDBRef DBKeyType deriving (Typeable)
-
-class ShowRefType rt where showRefType :: r rt t -> String
-
-instance (ShowRefType rt, Model t) => Show (GDBRef rt t) where
-  showsPrec n r@(GDBRef k) = showParen (n > 10) $
-    (showRefType r ++) . ("{" ++) . (mname ++) . ("} " ++) . showsPrec 11 k
-    where mname = S8.unpack $ modelInfoName $ gmodelToInfo r
-instance FromField (GDBRef rt t) where
-  {-# INLINE fromField #-}
-  fromField f bs = GDBRef <$> fromField f bs
-instance ToField (GDBRef rt t) where
-  {-# INLINE toField #-}
-  toField (GDBRef k) = toField k
-
-data NormalRef = NormalRef deriving (Show, Typeable)
--- | A Haskell data type representing a foreign key reference in in
--- the database.  This data type only makes sense to use when type @a@
--- is also 'Model'.
-type DBRef = GDBRef NormalRef
-instance ShowRefType NormalRef where showRefType _ = "DBRef"
-
-data UniqueRef = UniqueRef deriving (Show, Typeable)
--- | A @DBURef@ is like a 'DBRef', but with an added uniqeuness
--- constraint.  In other words, if type @A@ contains a @DBURef B@,
--- then each @B@ has one (or at most one) @A@ associated with it.  By
--- contrast, if type @A@ contains a @'DBRef' B@, then each @B@ may be
--- associated with many rows of type @A@.
-type DBURef = GDBRef UniqueRef
-instance ShowRefType UniqueRef where showRefType _ = "DBURef"
-
-mkDBRef :: (Model a) => a -> GDBRef rt a
-mkDBRef a
-  | (DBKey k) <- primaryKey a = GDBRef k
-  | otherwise = error $ "mkDBRef " ++ S8.unpack (modelName a) ++ ": NullKey"
 
 
 -- | A newtype wrapper in the 'FromRow' class, permitting every model
