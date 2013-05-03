@@ -383,8 +383,10 @@ fmtCols True cs = "(" <> fmtCols False cs <> ")"
 -- example, 'defaultModelLookupQuery' consists of
 -- @modelSelectFragment@ followed by \"@WHERE@ /primary-key/ = ?\".
 modelSelectFragment :: ModelInfo a -> S.ByteString
-modelSelectFragment mi = S.concat [
-  "select ", fmtCols False (modelColumns mi), " from ", q (modelTable mi) ]
+modelSelectFragment mi =
+  S.concat [ "select ", S.intercalate ", " cols, " from ", qt ]
+  where qt = q $ modelTable mi
+        cols = map (\c -> qt <> "." <> q c) $ modelColumns mi
 
 defaultModelLookupQuery :: ModelInfo a -> Query
 defaultModelLookupQuery mi = Query $ S.concat [

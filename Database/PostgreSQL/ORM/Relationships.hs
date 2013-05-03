@@ -126,14 +126,13 @@ data JoinQueryTemplate a b = JoinQueryTemplate !Query deriving (Show)
 mkJoinQueryTemplate :: (Model a, Model b) =>
                        JoinTableInfo a b -> JoinQueryTemplate a b
 mkJoinQueryTemplate jt = JoinQueryTemplate $ Query $ S.concat [
-    "select ", qcols b, " from "
-  , quoteIdent (jtTable jt), " join ", quoteIdent (modelTable b)
+  modelSelectFragment b, " join ", quoteIdent (jtTable jt)
   , " on ", quoteIdent (jtTable jt), ".", quoteIdent (jtColumnB jt)
   , " = ", quoteIdent (modelTable b), ".", quoteIdent (jtKeyB jt)
   , " where ", quoteIdent (jtTable jt), ".", quoteIdent (jtColumnA jt)
   , " = ?"
   ]
-  where (_, b) = joinTableInfoModels jt
+  where b = gmodelToInfo jt
         qcols mi = S.intercalate ", " $ map qcol $ modelColumns mi
           where qname = quoteIdent $ modelTable mi
                 qcol c = qname <> "." <> quoteIdent c
