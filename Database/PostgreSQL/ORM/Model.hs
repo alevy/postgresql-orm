@@ -7,11 +7,12 @@ module Database.PostgreSQL.ORM.Model (
     , DBRef, DBURef, GDBRef(..), mkDBRef
       -- * The Model class
     , Model(..), ModelInfo(..), ModelQueries(..)
+      -- * Database operations on Models
+    , findKey, findRef, save, destroy, destroyByRef
+      -- * Functions for accissing and using Models
     , modelToInfo, gmodelToInfo, modelToQueries, gmodelToQueries
     , modelName, primaryKey
     , LookupRow(..), UpdateRow(..), InsertRow(..)
-      -- * Database operations
-    , findKey, findRef, save, destroy, destroyByRef
       -- * Low-level functions providing manual access to defaults
     , defaultModelInfo
     , defaultModelTable, defaultModelColumns, defaultModelGetPrimaryKey
@@ -19,10 +20,10 @@ module Database.PostgreSQL.ORM.Model (
     , defaultModelQueries
     , defaultModelLookupQuery, defaultModelUpdateQuery
     , defaultModelInsertQuery, defaultModelDeleteQuery
-      -- * Low-level functions for generic FromRow/ToRow
-    , GFromRow(..), defaultFromRow, GToRow(..), defaultToRow
       -- * Helper functions and miscellaneous internals
     , quoteIdent, ShowRefType(..), NormalRef(..), UniqueRef(..)
+      -- * Low-level functions for generic FromRow/ToRow
+    , GFromRow(..), defaultFromRow, GToRow(..), defaultToRow
     ) where
 
 import Control.Applicative
@@ -125,21 +126,27 @@ instance ToField (GDBRef rt t) where
 
 -- | See 'GDBRef'.
 data NormalRef = NormalRef deriving (Show, Typeable)
--- | The type @DBRef MyDatabaseTable@ references an instance of the
--- @MyDatabaseTable@ 'Model' by its primary key.  The type argument
--- (i.e., @MyDatabaseTable@ in this case) should be an instance of
+-- | @DBRef@ is a type alias of kind @* -> *@.  The type @DBRef T@
+-- references an instance of type @T@ by the primary key of its
+-- database row.  The type argument @T@ should be an instance of
 -- 'Model'.
 type DBRef = GDBRef NormalRef
 instance ShowRefType NormalRef where showRefType _ = "DBRef"
 
 -- | See 'GDBRef'.
 data UniqueRef = UniqueRef deriving (Show, Typeable)
--- | A @DBURef MyDatabaseTable@ is like a @'DBRef' MyDatabaseTable@,
--- but with an added uniqeuness constraint.  In other words, if type
--- @A@ contains a @DBURef B@, then each @B@ has one (or at most one)
--- @A@ associated with it.  By contrast, if type @A@ contains a
--- @'DBRef' B@, then each @B@ may be associated with many rows of type
--- @A@.
+-- | A @DBURef T@ is like a @'DBRef' T@, but with an added uniqeuness
+-- constraint.  In other words, if type @A@ contains a @DBURef B@,
+-- then each @B@ has one (or at most one) @A@ associated with it.  By
+-- contrast, if type @A@ contains a @'DBRef' B@, then each @B@ may be
+-- associated with many rows of type @A@.
+--
+-- Functionally, @DBURef@ and @DBRef@ are treated the same by this
+-- module.  However, other modules make a distinction.  For instance,
+-- the 'HasOne' class requires the child type to point to its parent
+-- with a @DBURef@, while the 'HasMany' class requires a 'DBRef'.
+-- Moreover, if code creates database tables automatically, the column
+-- for a 'DBURef' field should have a @UNIQUE@ constraint.
 type DBURef = GDBRef UniqueRef
 instance ShowRefType UniqueRef where showRefType _ = "DBURef"
 
@@ -165,15 +172,24 @@ data ModelInfo a = Model {
     -- letter is downcased.
   , modelColumns :: ![S.ByteString]
     -- ^ The name of columns in the database table that corresponds to
-    -- this model.  The column names should appear in the order that the
-    -- data fields occur in the haskell data type @a@ (or at least the
-    -- order in which 'modelRead' parses them).  The default is to use
-    -- the Haskell field names for @a@.  This default will fail to
-    -- compile if @a@ is not defined using record syntax.
+    -- this model.  The column names should appear in the order that
+    -- the data fields occur in the haskell data type @a@ (or at least
+    -- the order in which 'modelRead' parses them and 'modelWrite'
+    -- marshalls them).  The default is to use the Haskell field names
+    -- for @a@.  This default will fail to compile if @a@ is not
+    -- defined using record syntax.
   , modelPrimaryColumn :: !Int
-    -- ^ The 0-based index of the primary key column in 'modelColumns'
+    -- ^ The 0-based index of the primary key column in
+    -- 'modelColumns'.  This should be 0 when your data structure
+    -- starts with its @DBKey@ (hihgly recommended, and required by
+    -- 'defaultModelGetPrimaryKey').  If you customize this field you
+    -- must also customize 'modelGetPrimaryKey'--no check is made that
+    -- the two are coherent.
   , modelGetPrimaryKey :: !(a -> DBKey)
-    -- ^ Return the primary key of a particular model instance.
+    -- ^ Return the primary key of a particular model instance.  If
+    -- you customize this field you must also customize
+    -- 'modelPrimaryColumn'--no check is made that the two are
+    -- coherent.
   , modelRead :: !(RowParser a)
     -- ^ Parse a database row corresponding to the model.
   , modelWrite :: !(a -> [Action])
@@ -335,9 +351,13 @@ data ModelQueries a = ModelQueries {
   , modelInsertQuery :: !Query
     -- ^ A query template for inserting a new 'Model' in the database.
     -- The query parameters are all columns /except/ the primary key.
+    -- The query should return the full row as stored in the database
+    -- (including the values of fields, such as the primary key, that
+    -- have been chosen by the database server).
   , modelDeleteQuery :: !Query
     -- ^ A query template for deleting a 'Model' from the database.
-    -- The query paremeter is the primary key of the row to delete.
+    -- Should have a single query parameter, namely the 'DBKey' of the
+    -- row to delete.
   } deriving (Show)
 
 -- | Quote a SQL identifier (such as a column or field name) with
@@ -429,8 +449,8 @@ defaultModelQueries mi = ModelQueries {
 --      represent the primary key.  Other orders will cause a
 --      compilation error.
 --
--- If both of these conditions hold and your database nameing scheme
--- follows the default conventions, it is reasonable to leave a
+-- If both of these conditions hold and your database naming scheme
+-- follows the conventions of this module, it is reasonable to have a
 -- completely empty (default) instance declaration:
 --
 -- >   data MyType = MyType { myKey :: !DBKey
@@ -443,7 +463,7 @@ defaultModelQueries mi = ModelQueries {
 -- This is easily accomplished by overriding a few fields of the
 -- default structure.  For example, suppose your database columns use
 -- exactly the same name as your Haskell field names, but the name of
--- database table is not the same as the name of the Haskell data
+-- your database table is not the same as the name of the Haskell data
 -- type.  You can override the database table name (field
 -- 'modelTable') as follows:
 --
@@ -476,26 +496,39 @@ class Model a where
   modelQueries :: ModelQueries a
   modelQueries = defaultModelQueries modelInfo
 
+-- | Lookup the 'ModelInfo' corresponding to a type.  Non-strict in
+-- its parameter.
 modelToInfo :: (Model a) => a -> ModelInfo a
 {-# INLINE modelToInfo #-}
 modelToInfo _ = modelInfo
 
+-- | Lookup the 'ModelInfo' corresponding to a type @a@, given some
+-- other type parameterized by @a@ (e.g., a @'DBRef' a@).  Non-strict
+-- in its parameter.
 gmodelToInfo :: (Model a) => g a -> ModelInfo a
 {-# INLINE gmodelToInfo #-}
 gmodelToInfo _ = modelInfo
 
+-- | Lookup the 'ModelQueries' corresponding to a type.  Non-strict in
+-- its parameter.
 modelToQueries :: (Model a) => a -> ModelQueries a
 {-# INLINE modelToQueries #-}
 modelToQueries _ = modelQueries
 
+-- | Lookup the 'ModelQueries' corresponding to a type @a@, given some
+-- other type parameterized by @a@ (e.g., a @'DBRef' a@).  Non-strict
+-- in its parameter.
 gmodelToQueries :: (Model a) => g a -> ModelQueries a
 {-# INLINE gmodelToQueries #-}
 gmodelToQueries _ = modelQueries
 
+-- | Lookup the 'modelTable' of a 'Model' (@modelName = 'modelTable'
+-- . 'modelToInfo'@).
 modelName :: (Model a) => a -> S.ByteString
 {-# INLINE modelName #-}
 modelName = modelTable . modelToInfo
 
+-- | Lookup the primary key of a 'Model'.
 primaryKey :: (Model a) => a -> DBKey
 {-# INLINE primaryKey #-}
 primaryKey a = modelGetPrimaryKey modelInfo a
