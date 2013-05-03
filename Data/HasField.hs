@@ -46,7 +46,7 @@ instance GHasField (K1 i c) c TYes where
   gGetField (K1 c) = TYes c
   gFieldCount _ _ = 1
 instance (TypeGCast TNo g) => GHasField (K1 i c) c' g where
-  gGetField (K1 _) = typeGCast TNo
+  gGetField _ = typeGCast TNo
   gFieldCount _ _ = 1
 instance (GHasField a f ga, GHasField b f gb, GJustOne ga gb g) =>
          GHasField (a :*: b) f g where
@@ -88,7 +88,7 @@ instance GHasMaybeField (K1 i (Maybe c)) c TYes where
   gGetMaybeField (K1 mc) = TYes mc
   gMaybeFieldCount _ _ = 1
 instance (TypeGCast TNo g) => GHasMaybeField (K1 i c) c' g where
-  gGetMaybeField (K1 _) = typeGCast TNo
+  gGetMaybeField _ = typeGCast TNo
   gMaybeFieldCount _ _ = 1
 instance (GHasMaybeField a f ga, GHasMaybeField b f gb, GJustOne ga gb g) =>
     GHasMaybeField (a :*: b) f g where
