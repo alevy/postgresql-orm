@@ -27,7 +27,7 @@ module Database.PostgreSQL.ORM.Relationships (
 import qualified Data.ByteString as S
 import Data.Functor
 import Data.Int
-import Data.List
+import Data.List hiding (find)
 import Data.Maybe
 import Database.PostgreSQL.Simple
 import Database.PostgreSQL.Simple.Types
@@ -117,7 +117,7 @@ findMany = rdChildrenOf hasManyQuery
 
 findParent :: (HasParent child parent) =>
               Connection -> child -> IO (Maybe parent)
-findParent conn child = findRef conn (parentKey child)
+findParent conn child = find conn (parentKey child)
 
 
 data DummyForRetainingTypes a b = DummyForRetainingTypes

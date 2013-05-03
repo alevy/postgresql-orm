@@ -8,7 +8,8 @@ module Database.PostgreSQL.ORM.Model (
       -- * The Model class
     , Model(..), ModelInfo(..), ModelQueries(..)
       -- * Database operations on Models
-    , findKey, findRef, save, destroy, destroyByRef
+    , find, save, destroy, destroyByRef
+    , findAll
       -- * Functions for accissing and using Models
     , modelToInfo, gmodelToInfo, modelToQueries, gmodelToQueries
     , modelName, primaryKey, modelSelectFragment
@@ -21,7 +22,7 @@ module Database.PostgreSQL.ORM.Model (
     , defaultModelLookupQuery, defaultModelUpdateQuery
     , defaultModelInsertQuery, defaultModelDeleteQuery
       -- * Helper functions and miscellaneous internals
-    , quoteIdent, ShowRefType(..), NormalRef(..), UniqueRef(..)
+    , quoteIdent, NormalRef(..), UniqueRef(..)
     , printq
       -- * Low-level functions for generic FromRow/ToRow
     , GFromRow(..), defaultFromRow, GToRow(..), defaultToRow
@@ -34,7 +35,7 @@ import qualified Data.ByteString.Char8 as S8
 import Data.Char
 import Data.Int
 import Data.Monoid
-import Data.List
+import Data.List hiding (find)
 import Data.Typeable
 import Data.String
 import Database.PostgreSQL.Simple
@@ -110,14 +111,11 @@ isNullKey _       = False
 -- denoting the flavor of reference ('NormalRef' or 'UniqueRef').
 newtype GDBRef reftype table = DBRef DBKeyType deriving (Typeable)
 
--- | Just a hack so that 'show' prints \"'DBRef'\" on a @'GDBRef'
--- 'NormalRef'@ and \"'DBURef'\" on a @'GDBRef' 'UniqueRef'@.
-class ShowRefType rt where showRefType :: r rt t -> String
-
-instance (ShowRefType rt, Model t) => Show (GDBRef rt t) where
-  showsPrec n r@(DBRef k) = showParen (n > 10) $
-    (showRefType r ++) . ("{" ++) . (mname ++) . ("} " ++) . showsPrec 11 k
-    where mname = S8.unpack $ modelTable $ gmodelToInfo r
+instance (Model t) => Show (GDBRef rt t) where
+  showsPrec n (DBRef k) = showsPrec n k
+instance (Model t) => Read (GDBRef rt t) where
+  readsPrec n str = map wrap $ readsPrec n str
+    where wrap (k, s) = (DBRef k, s)
 instance FromField (GDBRef rt t) where
   {-# INLINE fromField #-}
   fromField f bs = DBRef <$> fromField f bs
@@ -132,7 +130,6 @@ data NormalRef = NormalRef deriving (Show, Typeable)
 -- database row.  The type argument @T@ should be an instance of
 -- 'Model'.
 type DBRef = GDBRef NormalRef
-instance ShowRefType NormalRef where showRefType _ = "DBRef"
 
 -- | See 'GDBRef'.
 data UniqueRef = UniqueRef deriving (Show, Typeable)
@@ -149,7 +146,6 @@ data UniqueRef = UniqueRef deriving (Show, Typeable)
 -- Moreover, if code creates database tables automatically, the column
 -- for a 'DBURef' field should have a @UNIQUE@ constraint.
 type DBURef = GDBRef UniqueRef
-instance ShowRefType UniqueRef where showRefType _ = "DBURef"
 
 -- | Create a reference to the primary key of a 'Model', suitable for
 -- storing in a different 'Model'.
@@ -562,6 +558,14 @@ newtype UpdateRow a = UpdateRow a deriving (Show, Typeable)
 instance (Model a) => ToRow (UpdateRow a) where
   toRow (UpdateRow a) = toRow $ InsertRow a :. Only (primaryKey a)
 
+findAll :: (Model r) => Connection -> IO [r]
+findAll c = action
+  where getInfo :: (Model r) => IO [r] -> ModelInfo r
+        getInfo _ = modelInfo
+        qs = getInfo action
+        action = do rs <- query_ c (Query $ modelSelectFragment qs)
+                    return $ map lookupRow rs
+
 -- | Fetch a row from the database by its primary key and convert it
 -- to a 'Model' of type @r@.  The @DBKey@ presumably comes from an
 -- external source (e.g., it was parsed using 'read' from a query
@@ -578,8 +582,8 @@ findKey c k = action
 
 -- | Follow a 'DBRef' or 'DBURef' and fetch the target row from the
 -- database into a 'Model' type @r@.
-findRef :: (Model r) => Connection -> GDBRef rt r -> IO (Maybe r)
-findRef c (DBRef k) = findKey c (DBKey k)
+find :: (Model r) => Connection -> GDBRef rt r -> IO (Maybe r)
+find c (DBRef k) = findKey c (DBKey k)
 
 -- | Write a 'Model' to the database.  If the primary key is
 -- 'NullKey', the item is written with an @INSERT@ query, read back

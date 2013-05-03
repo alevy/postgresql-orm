@@ -9,7 +9,10 @@ library
   default-language: Haskell2010
   build-depends: base < 6
                , bytestring
+               , directory
+               , filepath
                , postgresql-simple
+               , process
                , text
                , time
                , unix
