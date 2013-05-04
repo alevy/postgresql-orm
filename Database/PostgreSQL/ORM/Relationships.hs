@@ -5,6 +5,36 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
 
+-- | This module provides classes for two types of relationship
+-- between models.
+--
+-- When a model directly contains the primary key of another model as
+-- a 'DBRef' (or 'DBURef') field, this is a foreign key reference.
+-- The model containing a 'DBRef' is known as a /child/, which points
+-- to its /parent/.  Such a relationship is represented by class
+-- 'HasParent' (to fetch a child's parent).  'HasParent' is not that
+-- interesting, because you can always fetch the parent calling
+-- 'findRow' on its 'DBRef' anyway.  More interesting is the ability
+-- to find children of a particular parent, which is represented by
+-- either the 'HasMany' or 'HasOne' class.  Sometimes this kind of
+-- parent-child is described by saying the child /belongs to/ the
+-- parent it points to.
+--
+-- The other type of relationsihp is one recorded outside of either
+-- model in a separate database table called a /join table/.  Given
+-- two models @A@ and @B@, a join table is a third table in which one
+-- column contains a @'DBRef' A@ and the other a @'DBRef' B@.  A model
+-- @C@ belonging to both @A@ and @B@ can be used as a join table.
+-- However, the join table need not be a model, and can simply be a
+-- table with two 'DBRef's and no primary key of its own.  (In this
+-- case the table is conventionally called @A_B@.)  Sometimes a join
+-- table relationship is described as \"@A@ has and belongs to many
+-- @B@s.\" This module represents join tables with the class
+-- 'Joinable'.  When an instance @'Joinable' A B@ exists, it is
+-- possible to look up all of the @B@'s associated with a given
+-- element of model @A@.  Generally a 'Joinable' instance in the other
+-- direction (@'Joinable' B A@) should be defined as well, though this
+-- is not done automatically.
 module Database.PostgreSQL.ORM.Relationships (
   -- * Foreign key references
     DBRefInfo(..), DBRefQuery(..)

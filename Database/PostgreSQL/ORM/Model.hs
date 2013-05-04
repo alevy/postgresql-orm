@@ -20,6 +20,7 @@ module Database.PostgreSQL.ORM.Model (
     , defaultModelTable, defaultModelColumns, defaultModelGetPrimaryKey
     , defaultModelRead, defaultModelWrite
     , defaultModelQueries
+    , defaultModelQTable, defaultModelQColumns
     , defaultModelLookupQuery, defaultModelUpdateQuery
     , defaultModelInsertQuery, defaultModelDeleteQuery
       -- * Helper functions and miscellaneous internals
@@ -167,29 +168,28 @@ mkDBRef a
 data ModelInfo a = Model {
     modelTable :: !S.ByteString
     -- ^ The name of the database table corresponding to this model.
-    -- The default is the same as the type name, unless the first
-    -- letter is the only capital letter, in which case the first
-    -- letter is downcased.
+    -- The default is given by 'defaultModelTable'.
   , modelColumns :: [S.ByteString]
-    -- ^ The name of columns in the database table that corresponds to
-    -- this model.  The column names should appear in the order that
-    -- the data fields occur in the haskell data type @a@ (or at least
-    -- the order in which 'modelRead' parses them and 'modelWrite'
-    -- marshalls them).  The default is to use the Haskell field names
-    -- for @a@.  This default will fail to compile if @a@ is not
-    -- defined using record syntax.
+    -- ^ The names of the database columns corresponding to fields of
+    -- this model.  The column names should appear in the order in
+    -- which the fields are defined in the haskell data type @a@ (or
+    -- at least the order in which 'modelRead' parses them to an @a@
+    -- and 'modelWrite' marshalls them).  The default, given by
+    -- 'defaultModelColumns', is to use the Haskell field names for
+    -- @a@.  This default will fail to compile if @a@ is not defined
+    -- using record syntax.
   , modelPrimaryColumn :: Int
     -- ^ The 0-based index of the primary key column in
-    -- 'modelColumns'.  This should be 0 when your data structure
-    -- starts with its @DBKey@ (hihgly recommended, and required by
-    -- 'defaultModelGetPrimaryKey').  If you customize this field you
+    -- 'modelColumns'.  This should be 0 when your data structure's
+    -- first field is its 'DBKey' (hihgly recommended, and required by
+    -- 'defaultModelGetPrimaryKey').  If you customize this field, you
     -- must also customize 'modelGetPrimaryKey'--no check is made that
-    -- the two are coherent.
+    -- the two are consistent.
   , modelGetPrimaryKey :: (a -> DBKey)
     -- ^ Return the primary key of a particular model instance.  If
-    -- you customize this field you must also customize
+    -- you customize this field, you must also customize
     -- 'modelPrimaryColumn'--no check is made that the two are
-    -- coherent.
+    -- consistent.
   , modelRead :: !(RowParser a)
     -- ^ Parse a database row corresponding to the model.
   , modelWrite :: !(a -> [Action])
@@ -598,6 +598,13 @@ find :: (Model r) => Connection -> GDBRef rt r -> IO (Maybe r)
 {-# INLINE findRow #-}
 find = findRow
 
+-- | Find models matching a SQL @WHERE@ predicate given by a query and
+-- parameters.  For example, 'findAll' could have been defined as:
+--
+-- > {-# LANGUAGE OverloadedStrings #-}
+-- >
+-- > findAll :: (Model r) => Connection -> IO [r]
+-- > findAll c = findWhere "TRUE" c ()
 findWhere :: (ToRow parms, Model r) => Query -> Connection -> parms -> IO [r]
 {-# INLINE findWhere #-}
 findWhere (Query whereClause) c parms = action
@@ -606,6 +613,7 @@ findWhere (Query whereClause) c parms = action
         action = do rs <- query c sel parms
                     return $ map lookupRow rs
 
+-- | Return an entire database table.
 findAll :: (Model r) => Connection -> IO [r]
 findAll c = action
   where qs = gmodelToQueries (poptycon action)
