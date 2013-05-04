@@ -118,7 +118,7 @@ class (Model parent, Model child) => HasOne parent child where
   {-# INLINE hasOneQuery #-}
   hasOneQuery = defaultChildQuery hasOneInfo
 
-defaultParentKey :: DBRefInfo rt c p -> c -> DBRef p
+defaultParentKey :: DBRefInfo rt c p -> c -> Reference p
 defaultParentKey ri c = case dbrefSelector ri c of DBRef k -> DBRef k
 
 -- | The default only works for 'HasMany' relationships.  For 'HasOne'
@@ -128,8 +128,8 @@ defaultParentKey ri c = case dbrefSelector ri c of DBRef k -> DBRef k
 -- > instance HasParent Child Parent where
 -- >     parentKey = defaultParentKey hasOneInfo
 class (Model child, Model parent) => HasParent child parent where
-  parentKey :: child -> DBRef parent
-  default parentKey :: (HasMany parent child) => child -> DBRef parent
+  parentKey :: child -> Reference parent
+  default parentKey :: (HasMany parent child) => child -> Reference parent
   parentKey = defaultParentKey hasManyInfo
 
 rdChildrenOf :: (Model child, Model parent) =>
@@ -302,11 +302,11 @@ joinReverse :: (Joinable a b) => JoinTableInfo b a
 joinReverse = flipJoinTableInfo joinTable
 
 joinThroughModelInfo :: (Model jt, Model a, Model b
-                , HasMaybeField jt (DBRef a)
-                , HasMaybeField jt (DBRef b)) =>
+                , HasMaybeField jt (Reference a)
+                , HasMaybeField jt (Reference b)) =>
                 ModelInfo jt -> JoinTableInfo a b
 joinThroughModelInfo jt = jti
-  where dummyRef :: ModelInfo a -> DBRef a
+  where dummyRef :: ModelInfo a -> Reference a
         dummyRef _ = undefined
         poptycon :: ModelInfo a -> a
         poptycon _ = undefined
@@ -324,8 +324,8 @@ joinThroughModelInfo jt = jti
           }
 
 joinThroughModel :: (Model jt, Model a, Model b
-                   , HasMaybeField jt (DBRef a)
-                   , HasMaybeField jt (DBRef b)) =>
+                   , HasMaybeField jt (Reference a)
+                   , HasMaybeField jt (Reference b)) =>
                    jt -> JoinTableInfo a b
 joinThroughModel = joinThroughModelInfo . modelToInfo
 

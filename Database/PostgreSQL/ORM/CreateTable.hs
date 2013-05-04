@@ -54,7 +54,7 @@ data Bar = Bar {
   bar_key :: !DBKey
   , bar_none :: !Int32
   , bar_string :: !String
-  , bar_parent :: !(Maybe (DBURef Bar))
+  , bar_parent :: !(Maybe (UniqueReference Bar))
   } deriving (Show, Generic)
                                     
 instance Model Bar

@@ -2,11 +2,11 @@
     FlexibleContexts, FlexibleInstances, TypeOperators, OverloadedStrings #-}
 
 module Database.PostgreSQL.ORM.Model (
-      -- * Data types for holding primary keys
-    DBKeyType, DBKey(..), isNullKey
-    , DBRef, DBURef, GDBRef(..), mkDBRef
       -- * The Model class
-    , Model(..), ModelInfo(..), ModelQueries(..)
+      Model(..), ModelInfo(..), ModelQueries(..)
+      -- * Data types for holding primary keys
+    , DBKey(..), isNullKey
+    , Reference, UniqueReference, GDBRef(..), referenceTo
       -- * Database operations on Models
     , findRow, find, findWhere, findAll
     , save, destroy, destroyByRef
@@ -133,7 +133,7 @@ data NormalRef = NormalRef deriving (Show, Typeable)
 -- references an instance of type @T@ by the primary key of its
 -- database row.  The type argument @T@ should be an instance of
 -- 'Model'.
-type DBRef = GDBRef NormalRef
+type Reference = GDBRef NormalRef
 
 -- | See 'GDBRef'.
 data UniqueRef = UniqueRef deriving (Show, Typeable)
@@ -149,12 +149,12 @@ data UniqueRef = UniqueRef deriving (Show, Typeable)
 -- with a @DBURef@, while the 'HasMany' class requires a 'DBRef'.
 -- Moreover, if code creates database tables automatically, the column
 -- for a 'DBURef' field should have a @UNIQUE@ constraint.
-type DBURef = GDBRef UniqueRef
+type UniqueReference = GDBRef UniqueRef
 
 -- | Create a reference to the primary key of a 'Model', suitable for
 -- storing in a different 'Model'.
-mkDBRef :: (Model a) => a -> GDBRef rt a
-mkDBRef a
+referenceTo :: (Model a) => a -> GDBRef rt a
+referenceTo a
   | (DBKey k) <- primaryKey a = DBRef k
   | otherwise = error $ "mkDBRef " ++ S8.unpack (modelName a) ++ ": NullKey"
 
@@ -165,7 +165,7 @@ mkDBRef a
 -- converting type @T@ to and from database rows.  Each @'Model'@ type
 -- has a single @ModelInfo@ associated with it, accessible through the
 -- 'modelInfo' method.
-data ModelInfo a = Model {
+data ModelInfo a = ModelInfo {
     modelTable :: !S.ByteString
     -- ^ The name of the database table corresponding to this model.
     -- The default is given by 'defaultModelTable'.
@@ -323,13 +323,13 @@ defaultModelInfo :: (Generic a, GToRow (Rep a), GFromRow (Rep a)
                     , GPrimaryKey0 (Rep a), GColumns (Rep a)
                     , GDatatypeName (Rep a)) => ModelInfo a
 defaultModelInfo = m
-  where m = Model { modelTable = mname
-                  , modelColumns = cols
-                  , modelPrimaryColumn = pki
-                  , modelGetPrimaryKey = defaultModelGetPrimaryKey
-                  , modelRead = defaultModelRead
-                  , modelWrite = defaultModelWrite pki
-                  }
+  where m = ModelInfo { modelTable = mname
+                      , modelColumns = cols
+                      , modelPrimaryColumn = pki
+                      , modelGetPrimaryKey = defaultModelGetPrimaryKey
+                      , modelRead = defaultModelRead
+                      , modelWrite = defaultModelWrite pki
+                      }
         unModel :: ModelInfo a -> a
         unModel _ = undefined
         a = unModel m
