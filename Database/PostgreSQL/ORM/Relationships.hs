@@ -9,7 +9,7 @@
 -- between models.
 --
 -- When a model directly contains the primary key of another model as
--- a 'DBRef' (or 'DBURef') field, this is a foreign key reference.
+-- a 'DBRef' (or 'DBRefUnique') field, this is a foreign key reference.
 -- The model containing a 'DBRef' is known as a /child/, which points
 -- to its /parent/.  Such a relationship is represented by class
 -- 'HasParent' (to fetch a child's parent).  'HasParent' is not that
@@ -118,18 +118,18 @@ class (Model parent, Model child) => HasOne parent child where
   {-# INLINE hasOneQuery #-}
   hasOneQuery = defaultChildQuery hasOneInfo
 
-defaultParentKey :: DBRefInfo rt c p -> c -> Reference p
+defaultParentKey :: DBRefInfo rt c p -> c -> DBRef p
 defaultParentKey ri c = case dbrefSelector ri c of DBRef k -> DBRef k
 
 -- | The default only works for 'HasMany' relationships.  For 'HasOne'
--- (meaning the field is of type 'DBURef' instead of 'DBRef'), you
+-- (meaning the field is of type 'DBRefUnique' instead of 'DBRef'), you
 -- will need to say:
 --
 -- > instance HasParent Child Parent where
 -- >     parentKey = defaultParentKey hasOneInfo
 class (Model child, Model parent) => HasParent child parent where
-  parentKey :: child -> Reference parent
-  default parentKey :: (HasMany parent child) => child -> Reference parent
+  parentKey :: child -> DBRef parent
+  default parentKey :: (HasMany parent child) => child -> DBRef parent
   parentKey = defaultParentKey hasManyInfo
 
 rdChildrenOf :: (Model child, Model parent) =>
@@ -302,11 +302,11 @@ joinReverse :: (Joinable a b) => JoinTableInfo b a
 joinReverse = flipJoinTableInfo joinTable
 
 joinThroughModelInfo :: (Model jt, Model a, Model b
-                , HasMaybeField jt (Reference a)
-                , HasMaybeField jt (Reference b)) =>
+                , HasMaybeField jt (DBRef a)
+                , HasMaybeField jt (DBRef b)) =>
                 ModelInfo jt -> JoinTableInfo a b
 joinThroughModelInfo jt = jti
-  where dummyRef :: ModelInfo a -> Reference a
+  where dummyRef :: ModelInfo a -> DBRef a
         dummyRef _ = undefined
         poptycon :: ModelInfo a -> a
         poptycon _ = undefined
@@ -324,8 +324,8 @@ joinThroughModelInfo jt = jti
           }
 
 joinThroughModel :: (Model jt, Model a, Model b
-                   , HasMaybeField jt (Reference a)
-                   , HasMaybeField jt (Reference b)) =>
+                   , HasMaybeField jt (DBRef a)
+                   , HasMaybeField jt (DBRef b)) =>
                    jt -> JoinTableInfo a b
 joinThroughModel = joinThroughModelInfo . modelToInfo
 
@@ -374,7 +374,7 @@ data Bar = Bar {
   bar_key :: !DBKey
   , bar_none :: !Int32
   , bar_string :: !String
-  , bar_parent :: !(Maybe (DBURef Bar))
+  , bar_parent :: !(Maybe (DBRefUnique Bar))
   } deriving (Show, Generic)
 instance Model Bar
 

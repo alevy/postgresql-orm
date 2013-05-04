@@ -6,7 +6,7 @@ module Database.PostgreSQL.ORM.Model (
       Model(..), ModelInfo(..), ModelQueries(..)
       -- * Data types for holding primary keys
     , DBKey(..), isNullKey
-    , Reference, UniqueReference, GDBRef(..), referenceTo
+    , DBRef, DBRefUnique, GDBRef(..), referenceTo
       -- * Database operations on Models
     , findRow, find, findWhere, findAll
     , save, destroy, destroyByRef
@@ -133,7 +133,7 @@ data NormalRef = NormalRef deriving (Show, Typeable)
 -- references an instance of type @T@ by the primary key of its
 -- database row.  The type argument @T@ should be an instance of
 -- 'Model'.
-type Reference = GDBRef NormalRef
+type DBRef = GDBRef NormalRef
 
 -- | See 'GDBRef'.
 data UniqueRef = UniqueRef deriving (Show, Typeable)
@@ -149,7 +149,7 @@ data UniqueRef = UniqueRef deriving (Show, Typeable)
 -- with a @DBURef@, while the 'HasMany' class requires a 'DBRef'.
 -- Moreover, if code creates database tables automatically, the column
 -- for a 'DBURef' field should have a @UNIQUE@ constraint.
-type UniqueReference = GDBRef UniqueRef
+type DBRefUnique = GDBRef UniqueRef
 
 -- | Create a reference to the primary key of a 'Model', suitable for
 -- storing in a different 'Model'.
@@ -169,7 +169,7 @@ data ModelInfo a = ModelInfo {
     modelTable :: !S.ByteString
     -- ^ The name of the database table corresponding to this model.
     -- The default is given by 'defaultModelTable'.
-  , modelColumns :: [S.ByteString]
+  , modelColumns :: ![S.ByteString]
     -- ^ The names of the database columns corresponding to fields of
     -- this model.  The column names should appear in the order in
     -- which the fields are defined in the haskell data type @a@ (or
@@ -178,7 +178,7 @@ data ModelInfo a = ModelInfo {
     -- 'defaultModelColumns', is to use the Haskell field names for
     -- @a@.  This default will fail to compile if @a@ is not defined
     -- using record syntax.
-  , modelPrimaryColumn :: Int
+  , modelPrimaryColumn :: !Int
     -- ^ The 0-based index of the primary key column in
     -- 'modelColumns'.  This should be 0 when your data structure's
     -- first field is its 'DBKey' (hihgly recommended, and required by
