@@ -108,11 +108,15 @@ stopLocalDB dir0 = do
   e <- systemNoStdout "pg_ctl" ["stop", "-D", dir, "-m", "fast"]
   when (e /= ExitSuccess) $ fail "could not stop postgres"
 
--- | Shell commands you can eval or cut-and-paste into your shell to
--- make @pg_ctl@ and @psql@ access a local database cluster.
+-- | Set environment variables to make a local database cluster the
+-- default.  Also returns shell commands you can eval or cut-and-paste
+-- into your shell to make @pg_ctl@ and @psql@ access a local database
+-- cluster.
 setLocalDB :: FilePath -> IO String
 setLocalDB dir0 = do
   dir1 <- canonicalizePath dir0
+  setEnv "PGHOST" dir1 True
+  setEnv "PGDATA" dir1 True
   let dir = showCommandForUser dir1 []
   msh <- getEnv "SHELL"
   return $ case msh of Just sh | isSuffixOf "csh" sh ->
