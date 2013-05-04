@@ -64,8 +64,9 @@ defaultDBRefInfo _ = ri
 defaultChildQuery :: (Model child) =>
                      DBRefInfo rt child parent -> DBRefQuery rt child parent
 defaultChildQuery ri = DBRefQuery $ Query $ S.concat [
-  modelSelectFragment c, " where ", quoteIdent (dbrefColumn ri), " = ?"]
-  where c = (const modelInfo :: Model c => DBRefInfo rt c p -> ModelInfo c) ri
+  modelSelectFragment cq, " where ", quoteIdent (dbrefColumn ri), " = ?"]
+  where cq = (const modelQueries
+              :: Model c => DBRefInfo rt c p -> ModelQueries c) ri
 
 class (Model parent, Model child) => HasMany parent child where
   hasManyInfo :: DBRefInfo NormalRef child parent
@@ -166,13 +167,13 @@ defaultJoinTableQueries jt = JoinTableQueries {
 
 defaultjtLookupQuery :: (Model b) => JoinTableInfo a b -> Query
 defaultjtLookupQuery jt = Query $ S.concat [
-  modelSelectFragment b, " join ", quoteIdent (jtTable jt)
+  modelSelectFragment bq, " join ", quoteIdent (jtTable jt)
   , " on ", quoteIdent (jtTable jt), ".", quoteIdent (jtColumnB jt)
   , " = ", quoteIdent (modelTable b), ".", quoteIdent (jtKeyB jt)
   , " where ", quoteIdent (jtTable jt), ".", quoteIdent (jtColumnA jt)
   , " = ?"
   ]
-  where b = gmodelToInfo jt
+  where (bq, b) = (gmodelToQueries jt, gmodelToInfo jt)
 
 -- | Creates a query for adding a join relationsihp to the table.  If
 -- the first argument is 'True', then duplicates will be allowed in

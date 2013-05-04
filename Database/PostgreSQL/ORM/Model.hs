@@ -8,17 +8,17 @@ module Database.PostgreSQL.ORM.Model (
       -- * The Model class
     , Model(..), ModelInfo(..), ModelQueries(..)
       -- * Database operations on Models
-    , find, save, destroy, destroyByRef
+    , find, findRow, save, destroy, destroyByRef
     , findAll
       -- * Functions for accissing and using Models
     , modelToInfo, gmodelToInfo, modelToQueries, gmodelToQueries
-    , modelName, primaryKey, modelSelectFragment
+    , modelName, primaryKey
     , LookupRow(..), UpdateRow(..), InsertRow(..)
       -- * Low-level functions providing manual access to defaults
     , defaultModelInfo
     , defaultModelTable, defaultModelColumns, defaultModelGetPrimaryKey
     , defaultModelRead, defaultModelWrite
-    , defaultModelQueries
+    , defaultModelQueries, defaultModelSelectFragment
     , defaultModelLookupQuery, defaultModelUpdateQuery
     , defaultModelInsertQuery, defaultModelDeleteQuery
       -- * Helper functions and miscellaneous internals
@@ -85,11 +85,13 @@ instance Ord DBKey where
 instance Show DBKey where
   showsPrec n (DBKey k) = showsPrec n k
   showsPrec _ NullKey   = ("NullKey" ++)
+{-
 instance Read DBKey where
   readsPrec n s = case readsPrec n s of
     -- Commenting out following line less correct, but maybe more secure
     -- [] | [("null", r)] <- lex s -> [(NullKey, r)]
     kr -> map (\(k, r) -> (DBKey k, r)) kr
+-}
 
 instance FromField DBKey where
   fromField _ Nothing = pure NullKey
@@ -335,7 +337,10 @@ defaultModelInfo = m
         cols = defaultModelColumns a
 
 data ModelQueries a = ModelQueries {
-    modelLookupQuery :: !Query
+    modelSelectFragment :: !S.ByteString
+    -- ^ A select statement returning all rows, to which one generally
+    -- should append a SQL @WHERE@ clause.
+  , modelLookupQuery :: !Query
     -- ^ A query template for looking up a model by its primary key.
     -- Should expect a single query parameter, namely the 'DBKey'
     -- being looked up.
@@ -379,15 +384,15 @@ fmtCols True cs = "(" <> fmtCols False cs <> ")"
 -- | Generate a SQL @SELECT@ statement with no @WHERE@ predicate.  For
 -- example, 'defaultModelLookupQuery' consists of
 -- @modelSelectFragment@ followed by \"@WHERE@ /primary-key/ = ?\".
-modelSelectFragment :: ModelInfo a -> S.ByteString
-modelSelectFragment mi =
+defaultModelSelectFragment :: ModelInfo a -> S.ByteString
+defaultModelSelectFragment mi =
   S.concat [ "select ", S.intercalate ", " cols, " from ", qt ]
   where qt = q $ modelTable mi
         cols = map (\c -> qt <> "." <> q c) $ modelColumns mi
 
 defaultModelLookupQuery :: ModelInfo a -> Query
 defaultModelLookupQuery mi = Query $ S.concat [
-    modelSelectFragment mi
+    defaultModelSelectFragment mi
   , " where ", q (modelColumns mi !! modelPrimaryColumn mi), " = ?"
   ]
 
@@ -418,7 +423,8 @@ defaultModelDeleteQuery mi = Query $ S.concat [
 -- | The default value of 'modelQueries'.
 defaultModelQueries :: ModelInfo a -> ModelQueries a
 defaultModelQueries mi = ModelQueries {
-    modelLookupQuery = defaultModelLookupQuery mi
+    modelSelectFragment = defaultModelSelectFragment mi
+  , modelLookupQuery = defaultModelLookupQuery mi
   , modelUpdateQuery = defaultModelUpdateQuery mi
   , modelInsertQuery = defaultModelInsertQuery mi
   , modelDeleteQuery = defaultModelDeleteQuery mi
@@ -560,9 +566,9 @@ instance (Model a) => ToRow (UpdateRow a) where
 
 findAll :: (Model r) => Connection -> IO [r]
 findAll c = action
-  where getInfo :: (Model r) => IO [r] -> ModelInfo r
-        getInfo _ = modelInfo
-        qs = getInfo action
+  where getQueries :: (Model r) => IO [r] -> ModelQueries r
+        getQueries _ = modelQueries
+        qs = getQueries action
         action = do rs <- query_ c (Query $ modelSelectFragment qs)
                     return $ map lookupRow rs
 
@@ -570,8 +576,7 @@ findAll c = action
 -- to a 'Model' of type @r@.  The @DBKey@ presumably comes from an
 -- external source (e.g., it was parsed using 'read' from a query
 -- parameter in a URL), otherwise you probably want 'findRef'.
-findKey :: (Model r) => Connection -> DBKey -> IO (Maybe r)
-findKey _ NullKey = error "findKey: NullKey"
+findKey :: (Model r) => Connection -> Int64 -> IO (Maybe r)
 findKey c k = action
   where getInfo :: (Model r) => IO (Maybe r) -> ModelQueries r
         getInfo _ = modelQueries
@@ -583,7 +588,14 @@ findKey c k = action
 -- | Follow a 'DBRef' or 'DBURef' and fetch the target row from the
 -- database into a 'Model' type @r@.
 find :: (Model r) => Connection -> GDBRef rt r -> IO (Maybe r)
-find c (DBRef k) = findKey c (DBKey k)
+{-# INLINE find #-}
+find c (DBRef k) = findKey c k
+
+-- | An alias for 'find', for people who don't want to hide the
+-- 'Data.List.find' function when importing "Data.List".
+findRow :: (Model r) => Connection -> GDBRef rt r -> IO (Maybe r)
+{-# INLINE findRow #-}
+findRow = find
 
 -- | Write a 'Model' to the database.  If the primary key is
 -- 'NullKey', the item is written with an @INSERT@ query, read back
