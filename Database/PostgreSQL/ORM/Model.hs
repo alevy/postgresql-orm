@@ -8,17 +8,18 @@ module Database.PostgreSQL.ORM.Model (
       -- * The Model class
     , Model(..), ModelInfo(..), ModelQueries(..)
       -- * Database operations on Models
-    , find, findRow, save, destroy, destroyByRef
-    , findAll
-      -- * Functions for accissing and using Models
+    , findRow, find, findWhere, findAll
+    , save, destroy, destroyByRef
+      -- * Functions for accessing and using Models
     , modelToInfo, gmodelToInfo, modelToQueries, gmodelToQueries
     , modelName, primaryKey
+    , modelSelectFragment, modelQKey
     , LookupRow(..), UpdateRow(..), InsertRow(..)
       -- * Low-level functions providing manual access to defaults
     , defaultModelInfo
     , defaultModelTable, defaultModelColumns, defaultModelGetPrimaryKey
     , defaultModelRead, defaultModelWrite
-    , defaultModelQueries, defaultModelSelectFragment
+    , defaultModelQueries
     , defaultModelLookupQuery, defaultModelUpdateQuery
     , defaultModelInsertQuery, defaultModelDeleteQuery
       -- * Helper functions and miscellaneous internals
@@ -169,7 +170,7 @@ data ModelInfo a = Model {
     -- The default is the same as the type name, unless the first
     -- letter is the only capital letter, in which case the first
     -- letter is downcased.
-  , modelColumns :: ![S.ByteString]
+  , modelColumns :: [S.ByteString]
     -- ^ The name of columns in the database table that corresponds to
     -- this model.  The column names should appear in the order that
     -- the data fields occur in the haskell data type @a@ (or at least
@@ -177,14 +178,14 @@ data ModelInfo a = Model {
     -- marshalls them).  The default is to use the Haskell field names
     -- for @a@.  This default will fail to compile if @a@ is not
     -- defined using record syntax.
-  , modelPrimaryColumn :: !Int
+  , modelPrimaryColumn :: Int
     -- ^ The 0-based index of the primary key column in
     -- 'modelColumns'.  This should be 0 when your data structure
     -- starts with its @DBKey@ (hihgly recommended, and required by
     -- 'defaultModelGetPrimaryKey').  If you customize this field you
     -- must also customize 'modelGetPrimaryKey'--no check is made that
     -- the two are coherent.
-  , modelGetPrimaryKey :: !(a -> DBKey)
+  , modelGetPrimaryKey :: (a -> DBKey)
     -- ^ Return the primary key of a particular model instance.  If
     -- you customize this field you must also customize
     -- 'modelPrimaryColumn'--no check is made that the two are
@@ -336,10 +337,13 @@ defaultModelInfo = m
         pki = 0
         cols = defaultModelColumns a
 
+
 data ModelQueries a = ModelQueries {
-    modelSelectFragment :: !S.ByteString
-    -- ^ A select statement returning all rows, to which one generally
-    -- should append a SQL @WHERE@ clause.
+    modelQTable :: !S.ByteString
+    -- ^ SQL quoted identifier for the name of the table.
+  , modelQColumns :: ![S.ByteString]
+    -- ^ Fully-qualified and quoted SQL identifier names of all the
+    -- columns.
   , modelLookupQuery :: !Query
     -- ^ A query template for looking up a model by its primary key.
     -- Should expect a single query parameter, namely the 'DBKey'
@@ -381,18 +385,18 @@ fmtCols :: Bool -> [S.ByteString] -> S.ByteString
 fmtCols False cs = S.intercalate ", " (map q cs)
 fmtCols True cs = "(" <> fmtCols False cs <> ")"
 
--- | Generate a SQL @SELECT@ statement with no @WHERE@ predicate.  For
--- example, 'defaultModelLookupQuery' consists of
--- @modelSelectFragment@ followed by \"@WHERE@ /primary-key/ = ?\".
-defaultModelSelectFragment :: ModelInfo a -> S.ByteString
-defaultModelSelectFragment mi =
-  S.concat [ "select ", S.intercalate ", " cols, " from ", qt ]
+defaultModelQTable :: ModelInfo a -> S.ByteString
+defaultModelQTable mi = q $ modelTable mi
+
+defaultModelQColumns :: ModelInfo a -> [S.ByteString]
+defaultModelQColumns mi = map qualify $ modelColumns mi
   where qt = q $ modelTable mi
-        cols = map (\c -> qt <> "." <> q c) $ modelColumns mi
+        qualify c = qt <> "." <> q c
 
 defaultModelLookupQuery :: ModelInfo a -> Query
 defaultModelLookupQuery mi = Query $ S.concat [
-    defaultModelSelectFragment mi
+    "select ", S.intercalate ", " $ defaultModelQColumns mi
+  , " from ", defaultModelQTable mi
   , " where ", q (modelColumns mi !! modelPrimaryColumn mi), " = ?"
   ]
 
@@ -423,7 +427,8 @@ defaultModelDeleteQuery mi = Query $ S.concat [
 -- | The default value of 'modelQueries'.
 defaultModelQueries :: ModelInfo a -> ModelQueries a
 defaultModelQueries mi = ModelQueries {
-    modelSelectFragment = defaultModelSelectFragment mi
+    modelQTable = defaultModelQTable mi
+  , modelQColumns = defaultModelQColumns mi
   , modelLookupQuery = defaultModelLookupQuery mi
   , modelUpdateQuery = defaultModelUpdateQuery mi
   , modelInsertQuery = defaultModelInsertQuery mi
@@ -544,6 +549,21 @@ primaryKey :: (Model a) => a -> DBKey
 {-# INLINE primaryKey #-}
 primaryKey a = modelGetPrimaryKey modelInfo a
 
+poptycon :: g a -> a
+poptycon _ = undefined
+
+-- | Generate a SQL @SELECT@ statement with no @WHERE@ predicate.  For
+-- example, 'defaultModelLookupQuery' consists of
+-- @modelSelectFragment@ followed by \"@WHERE@ /primary-key/ = ?\".
+modelSelectFragment :: ModelQueries a -> S.ByteString
+modelSelectFragment qs = S.concat [
+  "select ", S.intercalate ", " $ modelQColumns qs , " from ", modelQTable qs ]
+
+-- | Retreive a quoted and fully-qualified name of the column storing
+-- a model's primary keys.
+modelQKey :: (Model a) => g a -> S.ByteString
+modelQKey ga =
+  modelQColumns (gmodelToQueries ga) !! modelPrimaryColumn (gmodelToInfo ga)
 
 -- | A newtype wrapper in the 'FromRow' class, permitting every model
 -- to used as the result of a database query.
@@ -564,38 +584,34 @@ newtype UpdateRow a = UpdateRow a deriving (Show, Typeable)
 instance (Model a) => ToRow (UpdateRow a) where
   toRow (UpdateRow a) = toRow $ InsertRow a :. Only (primaryKey a)
 
-findAll :: (Model r) => Connection -> IO [r]
-findAll c = action
-  where getQueries :: (Model r) => IO [r] -> ModelQueries r
-        getQueries _ = modelQueries
-        qs = getQueries action
-        action = do rs <- query_ c (Query $ modelSelectFragment qs)
-                    return $ map lookupRow rs
-
--- | Fetch a row from the database by its primary key and convert it
--- to a 'Model' of type @r@.  The @DBKey@ presumably comes from an
--- external source (e.g., it was parsed using 'read' from a query
--- parameter in a URL), otherwise you probably want 'findRef'.
-findKey :: (Model r) => Connection -> Int64 -> IO (Maybe r)
-findKey c k = action
-  where getInfo :: (Model r) => IO (Maybe r) -> ModelQueries r
-        getInfo _ = modelQueries
-        qs = getInfo action
+-- | Follow a 'DBRef' or 'DBURef' and fetch the target row from the
+-- database into a 'Model' type @r@.
+findRow :: (Model r) => Connection -> GDBRef rt r -> IO (Maybe r)
+findRow c k = action
+  where qs = gmodelToQueries $ poptycon action
         action = do rs <- query c (modelLookupQuery qs) (Only k)
                     case rs of [r] -> return $ Just $ lookupRow $ r
                                _   -> return Nothing
 
--- | Follow a 'DBRef' or 'DBURef' and fetch the target row from the
--- database into a 'Model' type @r@.
+-- | An alias for 'findRow'.
 find :: (Model r) => Connection -> GDBRef rt r -> IO (Maybe r)
-{-# INLINE find #-}
-find c (DBRef k) = findKey c k
-
--- | An alias for 'find', for people who don't want to hide the
--- 'Data.List.find' function when importing "Data.List".
-findRow :: (Model r) => Connection -> GDBRef rt r -> IO (Maybe r)
 {-# INLINE findRow #-}
-findRow = find
+find = findRow
+
+findWhere :: (ToRow parms, Model r) => Query -> Connection -> parms -> IO [r]
+{-# INLINE findWhere #-}
+findWhere (Query whereClause) c parms = action
+  where sel = Query $ modelSelectFragment (gmodelToQueries (poptycon action))
+              <> " where " <> whereClause
+        action = do rs <- query c sel parms
+                    return $ map lookupRow rs
+
+findAll :: (Model r) => Connection -> IO [r]
+findAll c = action
+  where qs = gmodelToQueries (poptycon action)
+        action = do rs <- query_ c (Query $ modelSelectFragment qs)
+                    return $ map lookupRow rs
+
 
 -- | Write a 'Model' to the database.  If the primary key is
 -- 'NullKey', the item is written with an @INSERT@ query, read back
