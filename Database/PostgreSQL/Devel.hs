@@ -108,7 +108,7 @@ stopLocalDB dir0 = do
   e <- systemNoStdout "pg_ctl" ["stop", "-D", dir, "-m", "fast"]
   when (e /= ExitSuccess) $ fail "could not stop postgres"
 
--- | Shell commands you can evan or cut and paste into your shell to
+-- | Shell commands you can eval or cut-and-paste into your shell to
 -- make @pg_ctl@ and @psql@ access a local database cluster.
 setLocalDB :: FilePath -> IO String
 setLocalDB dir0 = do

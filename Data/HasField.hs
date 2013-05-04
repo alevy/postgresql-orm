@@ -105,13 +105,14 @@ instance (GHasMaybeField x f g) => GHasMaybeField (M1 i c x) f g where
   gMaybeFieldCount ~(M1 xp) f = gMaybeFieldCount xp f
 
 class (Generic a, GHasMaybeField (Rep a) f TYes) => HasMaybeField a f where
-  -- | Similar to 'getMaybeFieldPos', but looks for a field that is
-  -- either of type @f@ or of type @Maybe f@.  (Only one field may have
-  -- either of those two types.)
+  -- | Similar to 'getFieldPos', but looks for a field that is of type
+  -- either @f@ or of type @Maybe f@.  (Only one field may have either
+  -- of those two types.)
   getMaybeFieldPos :: (HasMaybeField a f) => a -> f -> Int
-  -- | Similar to 'getFieldVal', but looks for a field that is either of
-  -- type @f@ or of type @Maybe f@.  In the former case, the value is
-  -- wrapped with 'Just', so that the return type is always @Maybe f@.
+  -- | Similar to 'getFieldVal', but looks for a field that is of type
+  -- either @f@ or of type @Maybe f@.  In the former case, the value
+  -- is wrapped with 'Just' to ensure the return type is always @Maybe
+  -- f@.
   getMaybeFieldVal :: (HasMaybeField a f) => a -> Maybe f
 
 instance (Generic a, GHasMaybeField (Rep a) f TYes) => HasMaybeField a f where
