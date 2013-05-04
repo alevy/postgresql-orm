@@ -6,14 +6,14 @@ module Database.PostgreSQL.ORM.Model (
       Model(..), ModelInfo(..), ModelQueries(..)
       -- * Data types for holding primary keys
     , DBKey(..), isNullKey
-    , DBRef, DBRefUnique, GDBRef(..), referenceTo
+    , DBRef, DBRefUnique, GDBRef(..), mkDBRef
       -- * Database operations on Models
     , findRow, find, findWhere, findAll
     , save, destroy, destroyByRef
       -- * Functions for accessing and using Models
     , modelToInfo, gmodelToInfo, modelToQueries, gmodelToQueries
-    , modelName, primaryKey
-    , modelSelectFragment, modelQKey
+    , modelName, primaryKey, modelQKey
+    , modelSelectFragment
     , LookupRow(..), UpdateRow(..), InsertRow(..)
       -- * Low-level functions providing manual access to defaults
     , defaultModelInfo
@@ -113,7 +113,7 @@ isNullKey _       = False
 -- are just type aliases to a generalized reference type @GDBRef@,
 -- where @GDBRef@'s first type argument, @reftype@, is a phantom type
 -- denoting the flavor of reference ('NormalRef' or 'UniqueRef').
-newtype GDBRef reftype table = DBRef DBKeyType deriving (Typeable)
+newtype GDBRef reftype table = DBRef DBKeyType deriving (Typeable, Eq)
 
 instance (Model t) => Show (GDBRef rt t) where
   showsPrec n (DBRef k) = showsPrec n k
@@ -153,12 +153,10 @@ type DBRefUnique = GDBRef UniqueRef
 
 -- | Create a reference to the primary key of a 'Model', suitable for
 -- storing in a different 'Model'.
-referenceTo :: (Model a) => a -> GDBRef rt a
-referenceTo a
+mkDBRef :: (Model a) => a -> GDBRef rt a
+mkDBRef a
   | (DBKey k) <- primaryKey a = DBRef k
   | otherwise = error $ "mkDBRef " ++ S8.unpack (modelName a) ++ ": NullKey"
-
-
 
 
 -- | A @ModelInfo T@ contains all of the information necessary for
@@ -185,7 +183,7 @@ data ModelInfo a = ModelInfo {
     -- 'defaultModelGetPrimaryKey').  If you customize this field, you
     -- must also customize 'modelGetPrimaryKey'--no check is made that
     -- the two are consistent.
-  , modelGetPrimaryKey :: (a -> DBKey)
+  , modelGetPrimaryKey :: !(a -> DBKey)
     -- ^ Return the primary key of a particular model instance.  If
     -- you customize this field, you must also customize
     -- 'modelPrimaryColumn'--no check is made that the two are
@@ -512,6 +510,49 @@ class Model a where
   modelQueries :: ModelQueries a
   modelQueries = defaultModelQueries modelInfo
 
+-- | A degenerate instance of model representing a database join.  The
+-- ':.' instance only allows limited queries such as 'findWhere' and
+-- 'findAll'.  In particular, there is no primary key and no ability
+-- to 'save' or 'destroy' such a join.  Attempts to use such functions
+-- (including 'findRow', which requires a primary key) will result in
+-- an error.
+instance (Model a, Model b) => Model (a :. b) where
+  modelInfo = joinModelInfo
+  modelQueries = joinModelQueries
+
+joinModelInfo :: (Model a, Model b) => ModelInfo (a :. b)
+joinModelInfo = r
+  where r = ModelInfo {
+            modelTable = jname
+          , modelColumns = modelColumns mia ++ modelColumns mib
+          , modelPrimaryColumn = -1
+          , modelGetPrimaryKey = const err
+          , modelRead = (:.) <$> modelRead mia <*> modelRead mib
+          , modelWrite = const err
+          }
+        (mia, mib) = (const (modelInfo, modelInfo)
+                      :: (Model a, Model b) => ModelInfo (a :. b)
+                         -> (ModelInfo a, ModelInfo b)) r
+        jname = modelTable mia <> " :. " <> modelTable mib
+        err :: a
+        err = error $ "illegal use of join relation " ++ S8.unpack jname
+
+joinModelQueries :: (Model a, Model b) => ModelQueries (a :. b)
+joinModelQueries = r
+  where r = ModelQueries {
+            modelQTable = modelQTable qa <> ", " <> modelQTable qb
+          , modelQColumns = modelQColumns qa ++ modelQColumns qb
+          , modelLookupQuery = badQuery
+          , modelUpdateQuery = badQuery
+          , modelInsertQuery = badQuery
+          , modelDeleteQuery = badQuery
+          }
+        (qa, qb) = (const (modelQueries, modelQueries)
+                    :: (Model a, Model b) => ModelQueries (a :. b)
+                       -> (ModelQueries a, ModelQueries b)) r
+        badQuery = "select illegal_attempt_to_use_join_result_as_model"
+
+
 -- | Lookup the 'ModelInfo' corresponding to a type.  Non-strict in
 -- its parameter.
 modelToInfo :: (Model a) => a -> ModelInfo a
@@ -562,8 +603,12 @@ modelSelectFragment qs = S.concat [
 -- | Retreive a quoted and fully-qualified name of the column storing
 -- a model's primary keys.
 modelQKey :: (Model a) => g a -> S.ByteString
-modelQKey ga =
-  modelQColumns (gmodelToQueries ga) !! modelPrimaryColumn (gmodelToInfo ga)
+modelQKey ga
+  | n < 0 = error $ "modelQKey: " ++ S8.unpack (modelTable mi) ++
+            " has no primary key"
+  | otherwise = modelQColumns (gmodelToQueries ga) !! n
+  where mi = gmodelToInfo ga
+        n = modelPrimaryColumn mi
 
 -- | A newtype wrapper in the 'FromRow' class, permitting every model
 -- to used as the result of a database query.
