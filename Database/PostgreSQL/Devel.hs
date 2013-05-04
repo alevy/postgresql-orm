@@ -46,6 +46,10 @@ createLocalDB dir = do
                       ["-D", dir, "-o", "--no-locale", "init"] ""
   when (exit /= ExitSuccess) $ fail err
   dir' <- canonicalizePath dir
+  writeFile (dir </> "README_BEFORE_DELETING") $
+    "## IMPORTANT:  Run the following command before deleting this " ++
+    "directory ##\n\n" ++
+    "pg_ctl -D " ++ showCommandForUser dir' [] ++ " stop -m immediate\n\n"
   let confpath = dir </> "postgresql.conf"
   oldconf <- lines <$> readFile confpath
   let conf = unlines $ addDirectives (pgDirectives dir') oldconf
