@@ -1,5 +1,5 @@
 {-# LANGUAGE CPP, FlexibleInstances, FlexibleContexts, TypeOperators #-}
-{-# LANGUAGE DeriveGeneric, OverloadedStrings #-}
+{-# LANGUAGE DeriveGeneric, OverloadedStrings, MultiParamTypeClasses #-}
 
 module Database.PostgreSQL.ORM.CreateTable where
 
@@ -12,6 +12,7 @@ import Database.PostgreSQL.Simple.Types
 import GHC.Generics
 
 import Database.PostgreSQL.ORM.Model
+import Database.PostgreSQL.ORM.Relationships
 import Database.PostgreSQL.ORM.SqlType
 
 
@@ -49,26 +50,58 @@ class (Model a, Generic a, GDefTypes (Rep a)) => CreateTable a where
 createTable :: (CreateTable a) => a -> Query
 createTable a = createTableWithTypes (createTableTypes $ modelToInfo a) a
 
-
-data Bar = Bar {
-  bar_key :: !DBKey
-  , bar_none :: !Int32
-  , bar_string :: !String
-  , bar_parent :: !(Maybe (DBRefUnique Bar))
+data Foo = Foo {
+  foo_key :: !DBKey
+  , foo_name :: String
+  -- , parent :: !(Maybe (DBRef Bar))
   } deriving (Show, Generic)
                                     
+instance Model Foo
+
+mkFoo :: String -> Foo
+mkFoo = Foo NullKey
+
+data Bar = Bar {
+    bar_key :: !DBKey
+  , bar_none :: !(Maybe Int32)
+  , bar_name :: !String
+  , bar_parent :: !(Maybe (DBRef Bar))
+  } deriving (Show, Generic)
+
 instance Model Bar
+
 instance CreateTable Bar where
   createTableTypes _ = [("barString", "varchar(16)")]
 
+mkBar :: String -> Bar
+mkBar msg = Bar NullKey (Just n) msg Nothing
+  where n = foldl (+) 0 $ map (toEnum . fromEnum) msg
+
+instance HasMany Bar Bar
+
+data Joiner = Joiner {
+    jkey :: !DBKey
+  , jcomment :: !String
+  , jfoo :: (DBRef Foo)
+  , jbar :: !(Maybe (DBRef Bar))
+  } deriving (Show, Generic)
+instance Model Joiner
+
+
+instance Joinable Foo Bar where
+  joinTable = (joinThroughModel (undefined :: Joiner)) {
+    jtAllowModification = True }
+instance Joinable Bar Foo where
+  joinTable = joinReverse
+
 bar :: Bar
-bar = Bar NullKey 77 "hi" Nothing
+bar = Bar NullKey (Just 44) "hi" Nothing
 
 mkc :: IO Connection
 mkc = connectPostgreSQL ""
 
 bar' :: Bar
-bar' = Bar NullKey 78 "bye" Nothing
+bar' = Bar NullKey (Just 75) "bye" Nothing
 
 
 x :: Maybe Int32

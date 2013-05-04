@@ -1,5 +1,4 @@
 {-# LANGUAGE DefaultSignatures #-}
--- {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
@@ -64,8 +63,6 @@ import Database.PostgreSQL.Simple.Types
 
 import Data.HasField
 import Database.PostgreSQL.ORM.Model
-
--- import GHC.Generics
 
 data DBRefInfo reftype child parent = DBRefInfo {
     dbrefSelector :: !(child -> GDBRef reftype parent)
@@ -151,6 +148,7 @@ findParent :: (HasParent child parent) =>
 findParent conn child = find conn (parentKey child)
 
 
+-- | See comment at 'jtDummy'.
 data DummyForRetainingTypes a b = DummyForRetainingTypes
 instance Show (DummyForRetainingTypes a b) where show _ = ""
 
@@ -349,52 +347,3 @@ removeJoin :: (Joinable a b) => Connection -> a -> b -> IO Int64
 removeJoin c a b = execute c (jtRemoveQuery $ modelsToJTQ a b)
                    (primaryKey a, primaryKey b)
 
-
-{-
-select Post.*, User.* from Post, User, Comment where Comment.postId =
-	 Post.id and Comment.userId = User.id
-
-<aalevy> prefix is the table name referenced, suffix is the column
-	 name referenced  [15:54]
-<aalevy> so, "post_id" for example
-<aalevy> or, i guess "postId"
--}
-
-{-
-data Foo = Foo {
-  foo_key :: !DBKey
-  , foo_int :: !Int32
-  , parent :: !(Maybe (DBRef Bar))
-  } deriving (Show, Generic)
-                                    
-instance Model Foo
-
-
-data Bar = Bar {
-  bar_key :: !DBKey
-  , bar_none :: !Int32
-  , bar_string :: !String
-  , bar_parent :: !(Maybe (DBRefUnique Bar))
-  } deriving (Show, Generic)
-instance Model Bar
-
-
-data Joiner = Joiner {
-    jkey :: !DBKey
-  , jcomment :: !String
-  , jfoo :: (DBRef Foo)
-  , jbar :: !(Maybe (DBRef Bar))
-  } deriving (Show, Generic)
-instance Model Joiner
-
-bar :: Bar
-bar = Bar NullKey 77 "hi" (Just $ DBRef 3)
-
-instance Joinable Foo Bar where
-  joinTable = (joinThroughModel (undefined :: Joiner)) {
-    jtAllowModification = True }
-instance Joinable Bar Foo where
-  joinTable = joinReverse
-
-instance HasOne Bar Bar
--}
