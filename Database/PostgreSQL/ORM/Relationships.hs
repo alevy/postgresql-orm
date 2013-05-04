@@ -50,7 +50,7 @@ module Database.PostgreSQL.ORM.Relationships (
   , defaultJoinTableQueries
   , defaultjtLookupQuery, defaultjtAddQuery, defaultjtRemoveQuery
   -- * Internal details
-  , DummyForRetainingTypes(..)
+  , flipJoinTableInfo, DummyForRetainingTypes(..)
   ) where
 
 import qualified Data.ByteString as S

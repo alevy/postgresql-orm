@@ -50,6 +50,21 @@ class (Model a, Generic a, GDefTypes (Rep a)) => CreateTable a where
 createTable :: (CreateTable a) => a -> Query
 createTable a = createTableWithTypes (createTableTypes $ modelToInfo a) a
 
+createJoinTable :: (Joinable a b) => (a, b) -> Query
+createJoinTable ab
+  | not (jtAllowModification jt) = error $ S8.unpack (jtTable jt) ++
+                                   ": read-only join table"
+  | otherwise = Query $ S.concat [
+      "create table ", quoteIdent $ jtTable jt, " ("
+    , quoteIdent (jtColumnA jt), " ", sqlType refa
+    , ", ", quoteIdent (jtColumnB jt), " ", sqlType refb, ")"
+  ]
+  where jt = (const joinTable
+               :: (Joinable a b) => (a, b) -> JoinTableInfo a b) ab
+        (refa, refb) = (const (undefined, undefined)
+                        :: (a, b) -> (DBRef a, DBRef b)) ab
+
+
 data Foo = Foo {
   foo_key :: !DBKey
   , foo_name :: String
@@ -57,6 +72,7 @@ data Foo = Foo {
   } deriving (Show, Generic)
                                     
 instance Model Foo
+instance CreateTable Foo
 
 mkFoo :: String -> Foo
 mkFoo = Foo NullKey
@@ -69,7 +85,6 @@ data Bar = Bar {
   } deriving (Show, Generic)
 
 instance Model Bar
-
 instance CreateTable Bar where
   createTableTypes _ = [("barString", "varchar(16)")]
 
@@ -78,6 +93,7 @@ mkBar msg = Bar NullKey (Just n) msg Nothing
   where n = foldl (+) 0 $ map (toEnum . fromEnum) msg
 
 instance HasMany Bar Bar
+instance HasParent Bar Bar
 
 data Joiner = Joiner {
     jkey :: !DBKey
@@ -86,11 +102,13 @@ data Joiner = Joiner {
   , jbar :: !(Maybe (DBRef Bar))
   } deriving (Show, Generic)
 instance Model Joiner
+instance CreateTable Joiner
 
+joiner :: Joiner
+joiner = Joiner (DBKey 5) "join comment" (DBRef 1) Nothing
 
 instance Joinable Foo Bar where
-  joinTable = (joinThroughModel (undefined :: Joiner)) {
-    jtAllowModification = True }
+  joinTable = (joinThroughModel joiner) { jtAllowModification = True }
 instance Joinable Bar Foo where
   joinTable = joinReverse
 
