@@ -71,14 +71,14 @@ instance (SqlType a) => SqlType (Maybe a) where
   sqlType ~(Just a) = sqlBaseType a
   sqlBaseType _ = error "Table field Maybe should not be wrapped in other type"
 
-instance (Model a) => SqlType (DBRef a) where
+instance (Model a) => SqlType (Reference a) where
   sqlBaseType r@(DBRef k) = sqlBaseType k <> ref
     where t = gmodelToInfo r
           ref = S.concat [
               " references ", quoteIdent (modelTable t) , "("
               , quoteIdent (modelColumns t !! modelPrimaryColumn t), ")" ]
 
-instance (Model a) => SqlType (DBURef a) where
+instance (Model a) => SqlType (UniqueReference a) where
   sqlBaseType r@(DBRef k) = sqlBaseType k <> ref
     where t = gmodelToInfo r
           ref = S.concat [
