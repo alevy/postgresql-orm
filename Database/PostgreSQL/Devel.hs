@@ -92,7 +92,10 @@ initLocalDB dir0 = do
   when (e0 /= ExitSuccess) $ do
     e1 <- systemNoStdout "pg_ctl" ["start", "-w", "-D", dir]
     when (e1 /= ExitSuccess) $ fail "could not start postgres"
-  return defaultConnectInfo { connectHost = dir }
+  return defaultConnectInfo { connectHost = dir
+                            , connectUser = ""
+                            , connectDatabase = "postgres"
+                            }
 
 -- | Stop the server for a local database cluster entirely
 -- self-contained within one directory.  You must call this before
