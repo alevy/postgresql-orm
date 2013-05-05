@@ -15,6 +15,9 @@ import Database.PostgreSQL.ORM.Model
 import Database.PostgreSQL.ORM.Relationships
 import Database.PostgreSQL.ORM.SqlType
 
+-- import Database.PostgreSQL.ORM.Keywords
+import Control.Exception
+import Data.Functor
 
 class GDefTypes f where
   gDefTypes :: f p -> [S.ByteString]
@@ -122,9 +125,23 @@ mkc = connectPostgreSQL ""
 bar' :: Bar
 bar' = Bar NullKey (Just 75) "bye" Nothing
 
+data X = X deriving (Generic)
+instance RowAlias X
+
+selfjoin :: IO [Bar :. As X Bar]
+selfjoin = bracket mkc close $ \c ->
+  findWhere "bar.bar_key = x.bar_parent" c () :: IO [Bar :. As X Bar]
+
+selfjoin' :: IO [(Bar,Bar)]
+selfjoin' = bracket mkc close $ \c ->
+  map (\(b1 :. b2) -> (b1, fromAs X b2)) <$>
+      findWhere "bar.bar_key = X.bar_parent" c ()
+
 
 x :: Maybe Int32
 x = Just 5
 
 y :: Maybe Float
 y = Just 6.0
+
+

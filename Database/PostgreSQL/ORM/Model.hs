@@ -1,5 +1,11 @@
-{-# LANGUAGE DeriveDataTypeable, DefaultSignatures,
-    FlexibleContexts, FlexibleInstances, TypeOperators, OverloadedStrings #-}
+{-# LANGUAGE DeriveDataTypeable #-}
+{-# LANGUAGE DefaultSignatures #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE OverloadedStrings #-}
+
+{-# LANGUAGE DeriveGeneric #-}
 
 module Database.PostgreSQL.ORM.Model (
       -- * The Model class
@@ -7,6 +13,7 @@ module Database.PostgreSQL.ORM.Model (
       -- * Data types for holding primary keys
     , DBKey(..), isNullKey
     , DBRef, DBRefUnique, GDBRef(..), mkDBRef
+    , As(..), fromAs, RowAlias(..)
       -- * Database operations on Models
     , findRow, find, findWhere, findAll
     , save, destroy, destroyByRef
@@ -186,17 +193,31 @@ data ModelInfo a = ModelInfo {
   , modelWrite :: !(a -> [Action])
     -- ^ Format all fields except the primary key for writing the
     -- model to the database.
+  , modelIsTable :: !Bool
+    -- ^ True when the model corresponds to a simple table, as opposed
+    -- to a join or an 'As' alias.
   }
 
 instance Show (ModelInfo a) where
   show a = intercalate " " ["Model", show $ modelTable a
                            , show $ modelColumns a, show $ modelPrimaryColumn a
-                           , "???"]
+                           , "???", show $ modelIsTable a]
 
 class GDatatypeName f where
   gDatatypeName :: f p -> String
-instance (Datatype c) => GDatatypeName (M1 i c f) where 
+instance (Datatype c) => GDatatypeName (D1 c f) where 
   gDatatypeName a = datatypeName a
+-- | The default name of the database table corresponding to a Haskell
+-- type.  The default is the same as the type name with the first
+-- letter converted to lower-case.  (The rationale is that Haskell
+-- requires types to start with a capital letter, but all-lower-case
+-- table names are slightly easier to manipulate manually in
+-- PostgreSQL because they require less quoting.)
+defaultModelTable :: (Generic a, GDatatypeName (Rep a)) => a -> S.ByteString
+defaultModelTable = fromString . caseFold. gDatatypeName . from
+  where caseFold (h:t) = toLower h:t
+        caseFold s     = s
+{-
 -- | The default name of the database table corresponding to a Haskell
 -- type.  The default is the same as the type name, unless the first
 -- letter is the only capital letter, in which case the first letter
@@ -208,6 +229,7 @@ defaultModelTable :: (Generic a, GDatatypeName (Rep a)) => a -> S.ByteString
 defaultModelTable = fromString . maybeFold. gDatatypeName . from
   where maybeFold s | h:t <- s, not (any isUpper t) = toLower h:t
                     | otherwise                     = s
+-}
 
 class GColumns f where
   gColumns :: f p -> [S.ByteString]
@@ -320,6 +342,7 @@ defaultModelInfo = m
                       , modelGetPrimaryKey = defaultModelGetPrimaryKey
                       , modelRead = defaultModelRead
                       , modelWrite = defaultModelWrite pki
+                      , modelIsTable = True
                       }
         unModel :: ModelInfo a -> a
         unModel _ = undefined
@@ -363,7 +386,7 @@ data ModelQueries a = ModelQueries {
 -- should be passed as query parameters, meaning @postgresql-simple@
 -- will handle quoting them.)
 quoteIdent :: S.ByteString -> S.ByteString
-quoteIdent iden = S8.pack $ '"' : (go $ S8.unpack iden)
+quoteIdent iden = fromString $ '"' : (go $ S8.unpack iden)
   where go ('"':cs) = '"':'"':go cs
         go ('\0':_) = error $ "q: illegal NUL character in " ++ show iden
         go (c:cs)   = c:go cs
@@ -522,6 +545,7 @@ joinModelInfo = r
           , modelGetPrimaryKey = const err
           , modelRead = (:.) <$> modelRead mia <*> modelRead mib
           , modelWrite = const err
+          , modelIsTable = False
           }
         (mia, mib) = (const (modelInfo, modelInfo)
                       :: (Model a, Model b) => ModelInfo (a :. b)
@@ -544,6 +568,77 @@ joinModelQueries = r
                     :: (Model a, Model b) => ModelQueries (a :. b)
                        -> (ModelQueries a, ModelQueries b)) r
         badQuery = "select illegal_attempt_to_use_join_result_as_model"
+
+class GUnitType f where
+  gUnitTypeCon :: f p -> String
+instance (Constructor c) => GUnitType (C1 c U1) where
+  gUnitTypeCon m1 = conName m1
+instance (GUnitType f) => GUnitType (D1 c f) where
+  gUnitTypeCon = gUnitTypeCon . unM1
+
+-- | The class of types that can be used as tags in as 'As' alias.
+-- Such types should be unit types--in other words, have exactly one
+-- constructor that takes no arguments.  The 'Model' implementation
+-- requires a way to extract the name of that constructor without
+-- having a concrete instance of the type.  This is provided by the
+-- 'rowAliasName' method.
+class RowAlias a where
+  rowAliasName :: As a row -> S.ByteString
+  default rowAliasName :: (Generic a, GUnitType (Rep a)) =>
+                             As a row -> S.ByteString
+  rowAliasName as = fromString $ caseFold $ gUnitTypeCon . from $ fixtype as
+    where fixtype :: As a row -> a
+          fixtype _ = undefined
+          caseFold (h:t) = toLower h:t
+          caseFold s     = s
+
+-- | The newtype @As@ can be wrapped around an existing type to give
+-- it a table name alias in a query.  This is necessary when a model
+-- is being joined with itself, to distinguish the two instances of
+-- the database table.  For example:
+--
+-- @{-\# LANGUAGE DeriveGeneric, OverloadedStrings #-}
+--
+--data X = X deriving ('Generic')
+--instance 'RowAlias' X
+--
+-- \  ...
+--    r <- 'findWhere' \"bar.bar_key = x.bar_parent\" c () :: IO [Bar :. As X Bar]
+-- @
+newtype As alias row = As { unAs :: row } deriving (Show, Typeable)
+
+-- | @fromAs@ extracts the @row@ from an @'As' alias row@, but
+-- constrains the type of @alias@ to be the same as its first argument
+-- (which is non-strict).  This can save you from explicitly
+-- specifying types.  For example:
+--
+-- > data X = X deriving (Generic)
+-- > instance RowAlias X
+-- >
+-- > ...
+-- >   r <- map (\(b1 :. b2) -> (b1, fromAs X b2)) <$>
+-- >            findWhere "bar.bar_key = X.bar_parent" c ()
+fromAs :: alias -> As alias row -> row
+fromAs _ (As row) = row
+
+instance (Model a, RowAlias as) => Model (As as a) where
+  {-# INLINE modelInfo #-}
+  modelInfo
+    | not (modelIsTable inner) =
+        error "As constructor must be applied to simple tables"
+    | otherwise = inner {
+        modelGetPrimaryKey = \(As a) -> modelGetPrimaryKey inner a
+      , modelRead = As <$> modelRead inner
+      , modelWrite = const $ error "illegal attempt to write alias as model"
+      , modelIsTable = False
+      }
+    where inner = modelInfo
+  {-# INLINE modelQueries #-}
+  modelQueries = qs
+    where alias = rowAliasName $ poptycon qs
+          mi = gmodelToInfo qs
+          qs = (defaultModelQueries mi { modelTable = alias })
+               { modelQTable = q (modelTable mi) <> " as " <> q alias }
 
 
 -- | Lookup the 'ModelInfo' corresponding to a type.  Non-strict in
