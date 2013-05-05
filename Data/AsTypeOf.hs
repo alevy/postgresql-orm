@@ -21,7 +21,17 @@
 --   >    undef2_1 :: g1 (g a) b1 -> a
 --
 --   * @asTypeOf/N/@ is equivalent to @\\a t -> a `asTypeOf` undef/N/ t@.
+--
+--   * @gAsTypeOf/N/@ is like @asTypeOf/N/@, but constraints a type
+--   argument rather than a type.  This is analogous to 'gcast'
+--   ('gcast1', etc.) in "Data.Typeable".  For example:
+--
+--   >    asTypeOf2  ::   a -> g a b ->   a
+--   >    gAsTypeOf2 :: m a -> g a b -> m a
 module Data.AsTypeOf (asTypeOf, module Data.AsTypeOf) where
+
+asTypeOf' :: m a -> a -> m a
+asTypeOf' = const
 
 undef :: a -> a
 {-# INLINE undef #-}
@@ -29,12 +39,15 @@ undef _ = undefined
 
 -- The CPP language extension seems to use a pre-ansi C preprocessor.
 -- If that ever changes, then /**/ will have to change to ##.
-#define U(n, t)                 \
-  asTypeOf/**/n :: a -> t -> a; \
-  {-# INLINE asTypeOf/**/n #-}; \
-  asTypeOf/**/n = const;        \
-  undef/**/n :: t -> a;         \
-  {-# INLINE undef/**/n #-};    \
+#define U(n, t)                           \
+  asTypeOf/**/n :: a -> t -> a;           \
+  {-# INLINE asTypeOf/**/n #-};           \
+  asTypeOf/**/n = const;                  \
+  gAsTypeOf/**/n/**/ :: m a -> t -> m a;  \
+  {-# INLINE gAsTypeOf/**/n/**/ #-};      \
+  gAsTypeOf/**/n/**/ = const;             \
+  undef/**/n :: t -> a;                   \
+  {-# INLINE undef/**/n #-};              \
   undef/**/n _ = undefined;
 
 U (1, g a)
