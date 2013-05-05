@@ -211,8 +211,8 @@ instance (Datatype c) => GDatatypeName (D1 c f) where
 -- type.  The default is the same as the type name with the first
 -- letter converted to lower-case.  (The rationale is that Haskell
 -- requires types to start with a capital letter, but all-lower-case
--- table names are slightly easier to manipulate manually in
--- PostgreSQL because they require less quoting.)
+-- table names are easier to use in queries because PostgreSQL
+-- generally does not require them to be quoted.)
 defaultModelTable :: (Generic a, GDatatypeName (Rep a)) => a -> S.ByteString
 defaultModelTable = fromString . caseFold. gDatatypeName . from
   where caseFold (h:t) = toLower h:t
@@ -570,23 +570,45 @@ joinModelQueries = r
         badQuery = "select illegal_attempt_to_use_join_result_as_model"
 
 class GUnitType f where
-  gUnitTypeCon :: f p -> String
-instance (Constructor c) => GUnitType (C1 c U1) where
-  gUnitTypeCon m1 = conName m1
-instance (GUnitType f) => GUnitType (D1 c f) where
-  gUnitTypeCon = gUnitTypeCon . unM1
+  gUnitTypeName :: f p -> String
+instance GUnitType (C1 c U1) where
+  gUnitTypeName _ = error "gUnitTypeName"
+instance GUnitType V1 where
+  gUnitTypeName _ = error "gUnitTypeName"
+instance (Datatype c, GUnitType f) => GUnitType (D1 c f) where
+  gUnitTypeName = datatypeName
 
 -- | The class of types that can be used as tags in as 'As' alias.
 -- Such types should be unit types--in other words, have exactly one
--- constructor that takes no arguments.  The 'Model' implementation
--- requires a way to extract the name of that constructor without
--- having a concrete instance of the type.  This is provided by the
--- 'rowAliasName' method.
+-- constructor, which should be nullary (take no arguments).  The
+-- reason for this class is that the 'Model' instance for 'As'
+-- requires a way to extract the name of the row alias without having
+-- a concrete instance of the type.  This is provided by the
+-- 'rowAliasName' method (which must be non-strict).
 class RowAlias a where
   rowAliasName :: As a row -> S.ByteString
+  -- ^ Return the SQL identifier for the row alias.  This method must
+  -- be non-strict in its argument.  Hence, it should discard the
+  -- argument and return the name of the alias.  For example:
+  --
+  -- > {-# LANGUAGE OverloadedStrings #-}
+  -- >
+  -- > data My_alias = My_alias
+  -- > instance RowAlias My_alias where rowAliasName _ = "my_alias"
+  --
+  -- Keep in mind that PostgreSQL folds unquoted identifiers to
+  -- lower-case.  However, this library quotes row aliases in @SELECT@
+  -- statements, thereby preserving case.  Hence, if you want to call
+  -- 'findWhere' without double-quoting row aliases in your 'Query',
+  -- you should avoid capital letters in alias names.
+  --
+  -- A default implementation of @rowAliasName@ exists for unit types
+  -- (as well as empty data declarations) in the 'Generic' class.  The
+  -- default converts the first character of the typename to
+  -- lower-case, following the logic of 'defaultModelTable'.
   default rowAliasName :: (Generic a, GUnitType (Rep a)) =>
                              As a row -> S.ByteString
-  rowAliasName as = fromString $ caseFold $ gUnitTypeCon . from $ fixtype as
+  rowAliasName as = fromString $ caseFold $ gUnitTypeName . from $ fixtype as
     where fixtype :: As a row -> a
           fixtype _ = undefined
           caseFold (h:t) = toLower h:t
@@ -599,8 +621,8 @@ class RowAlias a where
 --
 -- @{-\# LANGUAGE DeriveGeneric, OverloadedStrings #-}
 --
---data X = X deriving ('Generic')
---instance 'RowAlias' X
+--data X = X deriving
+--instance 'RowAlias' X where rowAliasName = const \"x\"
 --
 -- \  ...
 --    r <- 'findWhere' \"bar.bar_key = x.bar_parent\" c () :: IO [Bar :. As X Bar]
@@ -613,7 +635,7 @@ newtype As alias row = As { unAs :: row } deriving (Show, Typeable)
 -- specifying types.  For example:
 --
 -- > data X = X deriving (Generic)
--- > instance RowAlias X
+-- > instance RowAlias X where rowAliasName = const "x"
 -- >
 -- > ...
 -- >   r <- map (\(b1 :. b2) -> (b1, fromAs X b2)) <$>
