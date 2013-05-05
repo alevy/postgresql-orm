@@ -30,8 +30,8 @@
 --   >    gAsTypeOf2 :: m a -> g a b -> m a
 module Data.AsTypeOf (asTypeOf, module Data.AsTypeOf) where
 
-asTypeOf' :: m a -> a -> m a
-asTypeOf' = const
+gAsTypeOf :: m a -> a -> m a
+gAsTypeOf = const
 
 undef :: a -> a
 {-# INLINE undef #-}
