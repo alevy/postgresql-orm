@@ -108,7 +108,8 @@ joiner :: Joiner
 joiner = Joiner (DBKey 5) "join comment" (DBRef 1) Nothing
 
 instance Joinable Foo Bar where
-  joinTable = (joinThroughModel joiner) { jtAllowModification = True }
+  -- joinTable = (joinThroughModel joiner) { jtAllowModification = True }
+  joinTable = joinDefault
 instance Joinable Bar Foo where
   joinTable = joinReverse
 

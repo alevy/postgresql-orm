@@ -87,13 +87,6 @@ instance Ord DBKey where
 instance Show DBKey where
   showsPrec n (DBKey k) = showsPrec n k
   showsPrec _ NullKey   = ("NullKey" ++)
-{-
-instance Read DBKey where
-  readsPrec n s = case readsPrec n s of
-    -- Commenting out following line less correct, but maybe more secure
-    -- [] | [("null", r)] <- lex s -> [(NullKey, r)]
-    kr -> map (\(k, r) -> (DBKey k, r)) kr
--}
 
 instance FromField DBKey where
   fromField _ Nothing = pure NullKey
