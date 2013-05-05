@@ -808,5 +808,12 @@ destroyByRef :: (Model a) => Connection -> GDBRef rt a -> IO ()
 destroyByRef c a =
   void $ execute c (modelDeleteQuery $ gmodelToQueries a) (Only a)
 
+deCamel :: String -> String
+deCamel = go True
+  where go _ ""                      = ""
+        go _ (h:t) | not (isUpper h) = h : go False t
+        go True (h:t)                = toLower h : go True t
+        go False (h:t)               = '_' : toLower h : go True t
+
 printq :: Query -> IO ()
 printq (Query bs) = S8.putStrLn bs

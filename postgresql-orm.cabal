@@ -17,7 +17,8 @@ library
                , time
                , unix
   ghc-options: -Wall
-  exposed-modules: Data.HasField
+  exposed-modules: Data.AsTypeOf
+                 , Data.HasField
                  , Data.RequireSelector
                  , Database.PostgreSQL.Devel
                  , Database.PostgreSQL.ORM.CreateTable
