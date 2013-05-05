@@ -17,6 +17,7 @@ import Database.PostgreSQL.Simple.Time
 import Database.PostgreSQL.Simple.ToField
 import Database.PostgreSQL.Simple.TypeInfo.Static
 
+import Data.AsTypeOf
 import Database.PostgreSQL.ORM.Model
 
 -- | The class of Haskell types that can be converted to and from a
@@ -73,14 +74,14 @@ instance (SqlType a) => SqlType (Maybe a) where
 
 instance (Model a) => SqlType (DBRef a) where
   sqlBaseType r@(DBRef k) = sqlBaseType k <> ref
-    where t = gmodelToInfo r
+    where t = modelInfo `gAsTypeOf1` r
           ref = S.concat [
               " references ", quoteIdent (modelTable t) , "("
               , quoteIdent (modelColumns t !! modelPrimaryColumn t), ")" ]
 
 instance (Model a) => SqlType (DBRefUnique a) where
   sqlBaseType r@(DBRef k) = sqlBaseType k <> ref
-    where t = gmodelToInfo r
+    where t = modelInfo `gAsTypeOf1` r
           ref = S.concat [
               " unique references ", quoteIdent (modelTable t) , "("
               , quoteIdent (modelColumns t !! modelPrimaryColumn t), ")" ]

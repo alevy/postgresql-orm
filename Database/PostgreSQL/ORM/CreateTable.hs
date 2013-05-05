@@ -11,6 +11,7 @@ import Database.PostgreSQL.Simple
 import Database.PostgreSQL.Simple.Types
 import GHC.Generics
 
+import Data.AsTypeOf
 import Database.PostgreSQL.ORM.Model
 import Database.PostgreSQL.ORM.Relationships
 import Database.PostgreSQL.ORM.SqlType
@@ -36,7 +37,7 @@ createTableWithTypes except a = Query $ S.concat [
   , S.intercalate ", " (go types names), ")"
   ]
   where types = gDefTypes $ from a
-        info = modelToInfo a
+        info = modelInfo `gAsTypeOf` a
         names = modelColumns info
         go (t:ts) (n:ns)
           | Just t' <- lookup n except = quoteIdent n <> " " <> t' : go ts ns
@@ -51,7 +52,8 @@ class (Model a, Generic a, GDefTypes (Rep a)) => CreateTable a where
   createTableTypes _ = []
 
 createTable :: (CreateTable a) => a -> Query
-createTable a = createTableWithTypes (createTableTypes $ modelToInfo a) a
+createTable a = createTableWithTypes
+                (createTableTypes $ modelInfo `gAsTypeOf` a) a
 
 createJoinTable :: (Joinable a b) => (a, b) -> Query
 createJoinTable ab

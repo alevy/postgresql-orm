@@ -61,6 +61,7 @@ import Data.Maybe
 import Database.PostgreSQL.Simple
 import Database.PostgreSQL.Simple.Types
 
+import Data.AsTypeOf
 import Data.HasField
 import Database.PostgreSQL.ORM.Model
 
@@ -85,7 +86,8 @@ defaultDBRefInfo _ = ri
         rp = (undefined :: DBRefInfo rt c p -> GDBRef rt p) ri
         ri = DBRefInfo {
             dbrefSelector = fromJust . getMaybeFieldVal
-          , dbrefColumn = modelColumns (modelToInfo c) !! getMaybeFieldPos c rp
+          , dbrefColumn = modelColumns (modelInfo `gAsTypeOf` c) !!
+                          getMaybeFieldPos c rp
           }
 
 defaultChildQuery :: (Model child) =>
@@ -197,11 +199,12 @@ defaultjtLookupQuery :: (Model b) => JoinTableInfo a b -> Query
 defaultjtLookupQuery jt = Query $ S.concat [
   modelSelectFragment bq, " join ", quoteIdent (jtTable jt)
   , " on ", quoteIdent (jtTable jt), ".", quoteIdent (jtColumnB jt)
-  , " = ", quoteIdent (modelTable b), ".", quoteIdent (jtKeyB jt)
+  , " = ", quoteIdent (modelTable bi), ".", quoteIdent (jtKeyB jt)
   , " where ", quoteIdent (jtTable jt), ".", quoteIdent (jtColumnA jt)
   , " = ?"
   ]
-  where (bq, b) = (gmodelToQueries jt, gmodelToInfo jt)
+  where bq = modelQueries `gAsTypeOf1` jt
+        bi = modelInfo `gAsTypeOf1` jt
 
 -- | Creates a query for adding a join relationsihp to the table.  If
 -- the first argument is 'True', then duplicates will be allowed in
@@ -325,7 +328,7 @@ joinThroughModel :: (Model jt, Model a, Model b
                    , HasMaybeField jt (DBRef a)
                    , HasMaybeField jt (DBRef b)) =>
                    jt -> JoinTableInfo a b
-joinThroughModel = joinThroughModelInfo . modelToInfo
+joinThroughModel = joinThroughModelInfo . gAsTypeOf modelInfo
 
 jtJoinOf :: (Model a, Model b) =>
             JoinTableQueries a b -> Connection -> a -> IO [b]

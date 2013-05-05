@@ -18,7 +18,6 @@ module Database.PostgreSQL.ORM.Model (
     , findRow, find, findWhere, findAll
     , save, destroy, destroyByRef
       -- * Functions for accessing and using Models
-    , modelToInfo, gmodelToInfo, modelToQueries, gmodelToQueries
     , modelName, primaryKey, modelQKey
     , modelSelectFragment
     , LookupRow(..), UpdateRow(..), InsertRow(..)
@@ -55,6 +54,7 @@ import Database.PostgreSQL.Simple.ToRow
 import Database.PostgreSQL.Simple.Types
 import GHC.Generics
 
+import Data.AsTypeOf
 import Data.RequireSelector
 
 -- | A type large enough to hold database primary keys.  Do not use
@@ -657,51 +657,22 @@ instance (Model a, RowAlias as) => Model (As as a) where
     where inner = modelInfo
   {-# INLINE modelQueries #-}
   modelQueries = qs
-    where alias = rowAliasName $ poptycon qs
-          mi = gmodelToInfo qs
+    where alias = rowAliasName $ undef1 qs
+          mi = modelInfo `gAsTypeOf1` qs
           qs = (defaultModelQueries mi { modelTable = alias })
                { modelQTable = q (modelTable mi) <> " as " <> q alias }
 
 
--- | Lookup the 'ModelInfo' corresponding to a type.  Non-strict in
--- its parameter.
-modelToInfo :: (Model a) => a -> ModelInfo a
-{-# INLINE modelToInfo #-}
-modelToInfo _ = modelInfo
-
--- | Lookup the 'ModelInfo' corresponding to a type @a@, given some
--- other type parameterized by @a@ (e.g., a @'DBRef' a@).  Non-strict
--- in its parameter.
-gmodelToInfo :: (Model a) => g a -> ModelInfo a
-{-# INLINE gmodelToInfo #-}
-gmodelToInfo _ = modelInfo
-
--- | Lookup the 'ModelQueries' corresponding to a type.  Non-strict in
--- its parameter.
-modelToQueries :: (Model a) => a -> ModelQueries a
-{-# INLINE modelToQueries #-}
-modelToQueries _ = modelQueries
-
--- | Lookup the 'ModelQueries' corresponding to a type @a@, given some
--- other type parameterized by @a@ (e.g., a @'DBRef' a@).  Non-strict
--- in its parameter.
-gmodelToQueries :: (Model a) => g a -> ModelQueries a
-{-# INLINE gmodelToQueries #-}
-gmodelToQueries _ = modelQueries
-
 -- | Lookup the 'modelTable' of a 'Model' (@modelName = 'modelTable'
--- . 'modelToInfo'@).
+-- . 'gAsTypeOf' 'modelInfo'@).
 modelName :: (Model a) => a -> S.ByteString
 {-# INLINE modelName #-}
-modelName = modelTable . modelToInfo
+modelName = modelTable . gAsTypeOf modelInfo
 
 -- | Lookup the primary key of a 'Model'.
 primaryKey :: (Model a) => a -> DBKey
 {-# INLINE primaryKey #-}
 primaryKey a = modelGetPrimaryKey modelInfo a
-
-poptycon :: g a -> a
-poptycon _ = undefined
 
 -- | Generate a SQL @SELECT@ statement with no @WHERE@ predicate.  For
 -- example, 'defaultModelLookupQuery' consists of
@@ -716,8 +687,8 @@ modelQKey :: (Model a) => g a -> S.ByteString
 modelQKey ga
   | n < 0 = error $ "modelQKey: " ++ S8.unpack (modelTable mi) ++
             " has no primary key"
-  | otherwise = modelQColumns (gmodelToQueries ga) !! n
-  where mi = gmodelToInfo ga
+  | otherwise = modelQColumns (modelQueries `gAsTypeOf1` ga) !! n
+  where mi = modelInfo `gAsTypeOf1` ga
         n = modelPrimaryColumn mi
 
 -- | A newtype wrapper in the 'FromRow' class, permitting every model
@@ -743,7 +714,7 @@ instance (Model a) => ToRow (UpdateRow a) where
 -- database into a 'Model' type @r@.
 findRow :: (Model r) => Connection -> GDBRef rt r -> IO (Maybe r)
 findRow c k = action
-  where qs = gmodelToQueries $ poptycon action
+  where qs = modelQueries `gAsTypeOf1_1` action
         action = do rs <- query c (modelLookupQuery qs) (Only k)
                     case rs of [r] -> return $ Just $ lookupRow $ r
                                _   -> return Nothing
@@ -763,7 +734,7 @@ find = findRow
 findWhere :: (ToRow parms, Model r) => Query -> Connection -> parms -> IO [r]
 {-# INLINE findWhere #-}
 findWhere (Query whereClause) c parms = action
-  where sel = Query $ modelSelectFragment (gmodelToQueries (poptycon action))
+  where sel = Query $ modelSelectFragment (modelQueries `gAsTypeOf1_1` action)
               <> " where " <> whereClause
         action = do rs <- query c sel parms
                     return $ map lookupRow rs
@@ -771,7 +742,7 @@ findWhere (Query whereClause) c parms = action
 -- | Return an entire database table.
 findAll :: (Model r) => Connection -> IO [r]
 findAll c = action
-  where qs = gmodelToQueries (poptycon action)
+  where qs = modelQueries `gAsTypeOf1_1` action
         action = do rs <- query_ c (Query $ modelSelectFragment qs)
                     return $ map lookupRow rs
 
@@ -791,7 +762,7 @@ save c r | NullKey <- primaryKey r = do
                case n of 1 -> return r
                          _ -> fail $ "save: database updated " ++ show n
                                      ++ " records"
-  where qs = modelToQueries r
+  where qs = modelQueries `gAsTypeOf` r
 
 -- | Remove the row corresponding to a particular data structure from
 -- the database.  This function only looks at the primary key in the
@@ -801,12 +772,13 @@ destroy :: (Model a) => Connection -> a -> IO ()
 destroy c a =
   case primaryKey a of
     NullKey -> fail "destroy: NullKey"
-    DBKey k -> void $ execute c (modelDeleteQuery $ modelToQueries a) (Only k)
+    DBKey k -> void $ execute c
+               (modelDeleteQuery $ modelQueries `gAsTypeOf` a) (Only k)
 
 -- | Remove a row from the database without fetching it first.
 destroyByRef :: (Model a) => Connection -> GDBRef rt a -> IO ()
 destroyByRef c a =
-  void $ execute c (modelDeleteQuery $ gmodelToQueries a) (Only a)
+  void $ execute c (modelDeleteQuery $ modelQueries `gAsTypeOf1` a) (Only a)
 
 deCamel :: String -> String
 deCamel = go True
