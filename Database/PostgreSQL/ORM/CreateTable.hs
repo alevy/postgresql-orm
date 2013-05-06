@@ -19,6 +19,7 @@ import Database.PostgreSQL.ORM.SqlType
 -- import Database.PostgreSQL.ORM.Keywords
 import Control.Exception
 import Data.Functor
+import Data.Maybe
 
 class GDefTypes f where
   gDefTypes :: f p -> [S.ByteString]
@@ -83,13 +84,13 @@ mkFoo :: String -> Foo
 mkFoo = Foo NullKey
 
 data Bar = Bar {
-    barKey :: !DBKey
-  , barLongFieldName :: !(Maybe Int32)
-  , barName :: !String
-  , barParent :: !(Maybe (DBRef Bar))
+    bar_key :: !DBKey
+  , bar_none :: !(Maybe Int32)
+  , bar_name :: !String
+  , bar_parent :: !(Maybe (DBRef Bar))
   } deriving (Show, Generic)
 
-instance Model Bar where modelInfo = underscoreModelInfo "bar"
+instance Model Bar -- where modelInfo = underscoreModelInfo "bar"
 instance CreateTable Bar where
   createTableTypes _ = [("bar_string", "varchar(16)")]
 
@@ -139,6 +140,10 @@ selfjoin' = bracket mkc close $ \c ->
   map (\(b1 :. b2) -> (b1, fromAs X b2)) <$>
       findWhere "bar.bar_key = X.bar_parent" c ()
 
+getOne :: (Model a) => DBKeyType -> IO a
+getOne k = bracket mkc close $ \c ->
+  let r = fromJust <$> findRow c (DBRef k `gAsTypeOf1` r)
+  in r
 
 x :: Maybe Int32
 x = Just 5

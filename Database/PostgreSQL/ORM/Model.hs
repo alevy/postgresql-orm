@@ -10,7 +10,7 @@ module Database.PostgreSQL.ORM.Model (
       Model(..), ModelInfo(..), ModelIdentifiers(..), ModelQueries(..)
     , underscoreModelInfo
       -- * Data types for holding primary keys
-    , DBKey(..), isNullKey
+    , DBKeyType, DBKey(..), isNullKey
     , DBRef, DBRefUnique, GDBRef(..), mkDBRef
     , As(..), fromAs, RowAlias(..)
       -- * Database operations on Models
@@ -178,7 +178,7 @@ data ModelInfo a = ModelInfo {
   , modelPrimaryColumn :: !Int
     -- ^ The 0-based index of the primary key column in
     -- 'modelColumns'.  This should be 0 when your data structure's
-    -- first field is its 'DBKey' (hihgly recommended, and required by
+    -- first field is its 'DBKey' (highly recommended, and required by
     -- 'defaultModelGetPrimaryKey').  If you customize this field, you
     -- must also customize 'modelGetPrimaryKey'--no check is made that
     -- the two are consistent.
@@ -194,7 +194,10 @@ data ModelInfo a = ModelInfo {
     -- model to the database.
   , modelIsTable :: !Bool
     -- ^ True when the model corresponds to a simple table, as opposed
-    -- to a join or an 'As' alias.
+    -- to a join.  When 'False', it is not safe to compute
+    -- 'ModelIdentifiers' in a standard way from this @ModelInfo@,
+    -- because, for instance, different columns might need to be
+    -- qualified by different table names.
   }
 
 instance Show (ModelInfo a) where
@@ -380,24 +383,24 @@ toUnderscore skipFirst | skipFirst = S8.pack . skip . S8.unpack
         go False (h:t)               = '_' : toLower h : go True t
 
 
--- | Quoted SQL identifiers for the table and column names.  For
--- normal models, these will simply be quoted versions of the fields
--- in the corresponding 'ModelInfo'.  However, for special cases such
--- as joins or 'As' aliases, the fields of this structure can contain
--- unquoted SQL keywords modifying quoted table and column
--- identifiers.
+-- | SQL table and column identifiers that should be copied verbatim
+-- into queries.  For normal models, these will simply be quoted
+-- versions of the fields in the corresponding 'ModelInfo'.  However,
+-- for special cases, the fields of this structure can contain
+-- unquoted SQL including @JOIN@ keywords.  In the case of joins,
+-- different elements of 'modelQColumns' may be qualified by different
+-- table names.
 data ModelIdentifiers a = ModelIdentifiers {
     modelQTable :: !S.ByteString
-    -- ^ SQL quoted identifier for the name of the table.
+    -- ^ Literal SQL for the name of the table.
   , modelQColumns :: ![S.ByteString]
-    -- ^ Fully-qualified and quoted SQL identifier names of all the
-    -- columns.
+    -- ^ Literal SQL for each, table-qualified column.
   , modelQPrimaryColumn :: S.ByteString
-    -- ^ Fully-qualified and quoted SQL identifier name of the columns
-    -- containing the primary key.
+    -- ^ Literal SQL for the model's primary key column.
   , modelQWriteColumns :: [S.ByteString]
-    -- ^ SQL identifier names of all the columns except the primary
-    -- key (i.e., columns that should be updated on a write).
+    -- ^ Literal SQL for all the (non-table-qualified) columns except
+    -- the primary key.  These are the columns that should be included
+    -- in an @INSERT@ or @UPDATE@.
   } deriving (Show)
 
 -- | Quote a SQL identifier (such as a column or field name) with
@@ -419,7 +422,7 @@ defaultModelIdentifiers mi = ModelIdentifiers {
     modelQTable = qtable
   , modelQColumns = qcols
   , modelQPrimaryColumn = qcols !! pki
-  , modelQWriteColumns = deleteAt pki qcols
+  , modelQWriteColumns = deleteAt pki $ map quoteIdent $ modelColumns mi
   }
   where qtable = quoteIdent (modelTable mi)
         qcol c = S.concat [qtable, ".", quoteIdent c]
@@ -489,29 +492,41 @@ defaultModelQueries mi = ModelQueries {
 
 
 -- | The class of data types that represent a database table.  This
--- class conveys two important pieces of information necessary to load
--- and save data structures from the database.
+-- class conveys information necessary to move a Haskell data
+-- structure in and out of a database table.
 --
 --   * 'modelInfo' provides information about translating between the
---     Haskell class instance and the database representation, in the
---     form of a 'ModelInfo' data structure.  Among other things, this
+--     Haskell data type and the database representation, in the form
+--     of a 'ModelInfo' data structure.  Among other things, this
 --     structure specifies the name of the database table, the names
 --     of the database columns corresponding to the Haskell data
 --     structure fields, and how to convert the data structure to and
 --     from database rows.
 --
---   * 'modelQueries' provides pre-formatted 'Query' templates for
---     common operations.  The default 'modelQueries' value is
---     generated from 'modelInfo' and should be suitable for most
---     cases.  Hence, most @Model@ instances should not specify
---     'modelQueries' and should instead perform customization in the
---     definition of 'modelInfo'.
+--   * 'modelIdentifiers' contains the table and column names verbatim
+--     as they should be inserted into SQL queries.  For normal
+--     models, these are simply double-quoted versions of the names in
+--     'modelInfo', with the column names qualified by the table name.
+--     However, for special cases such as join relations (with ':.')
+--     or row aliases (with 'As'), 'modelIdentifiers' can modify the
+--     table name with unquoted SQL identifiers (such as @JOIN@ and
+--     @AS@) and change the qualified column names appropriately.
 --
--- 'modelInfo' itself provides a reasonable default implementation for
+--   * 'modelQueries' provides pre-formatted 'Query' templates for
+--     'findRow', 'save', and 'destroy'.  The default 'modelQueries'
+--     value is generated from 'modelIdentifiers' and should not be
+--     modified.  However, for degenerate tables (such as joins
+--     created with ':.'), it is reasonable to make 'modelQueries'
+--     always throw an exception, thereby disallowing ordinary queries
+--     and requiring use of more general functions such as
+--     'findWhere'.
+--
+-- 'modelInfo' has a reasonable default implementation for
 -- types that are members of the 'Generic' class (using GHC's
 -- @DeriveGeneric@ extension), provided two conditions hold:
 --
---   1. The data type must be defined using record selector syntax.
+--   1. The data type must have a single constructor that is defined
+--   using record selector syntax.
 --
 --   2. The very first field of the data type must be a 'DBKey' to
 --      represent the primary key.  Other orders will cause a
@@ -522,6 +537,7 @@ defaultModelQueries mi = ModelQueries {
 -- completely empty (default) instance declaration:
 --
 -- >   data MyType = MyType { myKey :: !DBKey
+-- >                        , myName :: !S.ByteString
 -- >                        , ...
 -- >                        } deriving (Show, Generic)
 -- >   instance Model MyType
@@ -540,23 +556,21 @@ defaultModelQueries mi = ModelQueries {
 --
 -- Finally, if you dislike the conventions followed by
 -- 'defaultModelInfo', you can simply implement an alternate pattern.
--- For example, this module contains a function 'underscoreModelInfo'
--- that strips a prefix from field names and converts everything from
--- camel-case to underscore notation:
+-- An example of this is 'underscoreModelInfo', which strips a prefix
+-- off every field name and converts everything from camel-case to
+-- underscore notation:
 --
 -- >   instance Model MyType where
--- >       modelInfo = underscoreModelInfo "myTypePrefix"
+-- >       modelInfo = underscoreModelInfo "my"
 --
--- You can implement your own functions like 'underscoreModelInfo' in
--- terms of 'defaultModelInfo', or use some of the lower-level
--- functions from which 'defaultModelInfo' is built.  Each component
--- default function is separately exposed (e.g., 'defaultModelTable',
+-- The above code will associate @MyType@ with a database table
+-- @my_type@ having column names @key@, @name@, etc.
+--
+-- You can implement other patterns like 'underscoreModelInfo' by
+-- calling 'defaultModelInfo' and modifying the results.
+-- Alternatively, this module exposes the lower-level functions from
+-- which 'defaultModelInfo' is built (e.g., 'defaultModelTable',
 -- 'defaultModelColumns', 'defaultModelGetPrimaryKey', etc.).
---
--- The default queries are simiarly provided by a default function
--- 'defaultModelQueries', whose individual component functions are
--- exposed ('defaultModelLookupQuery', etc.).  However, customizing
--- the queries is not recommended.
 class Model a where
   modelInfo :: ModelInfo a
   default modelInfo :: (Generic a, GToRow (Rep a), GFromRow (Rep a)
@@ -711,6 +725,10 @@ aliasModelIdentifiers mi = ModelIdentifiers {
         qcols = map qcol $ modelColumns mi
         pki = modelPrimaryColumn mi
 
+-- | A degenerate instance of model that re-names the row with a SQL
+-- @AS@ keyword.  This is primarily useful when joining a model with
+-- itself.  Hence, standard operations ('findRow', 'save', 'destroy')
+-- are not allowed on 'As' models.
 instance (Model a, RowAlias as) => Model (As as a) where
   {-# INLINE modelInfo #-}
   modelInfo = aliasModelInfo modelInfo
