@@ -5,11 +5,9 @@
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-{-# LANGUAGE DeriveGeneric #-}
-
 module Database.PostgreSQL.ORM.Model (
       -- * The Model class
-      Model(..), ModelInfo(..), ModelQueries(..)
+      Model(..), ModelInfo(..), ModelIdentifiers(..), ModelQueries(..)
     , underscoreModelInfo
       -- * Data types for holding primary keys
     , DBKey(..), isNullKey
@@ -19,15 +17,14 @@ module Database.PostgreSQL.ORM.Model (
     , findRow, find, findWhere, findAll
     , save, destroy, destroyByRef
       -- * Functions for accessing and using Models
-    , modelName, primaryKey, modelQKey
-    , modelSelectFragment
+    , modelName, primaryKey, modelSelectFragment
     , LookupRow(..), UpdateRow(..), InsertRow(..)
       -- * Low-level functions providing manual access to defaults
     , defaultModelInfo
     , defaultModelTable, defaultModelColumns, defaultModelGetPrimaryKey
     , defaultModelRead, defaultModelWrite
+    , defaultModelIdentifiers
     , defaultModelQueries
-    , defaultModelQTable, defaultModelQColumns
     , defaultModelLookupQuery, defaultModelUpdateQuery
     , defaultModelInsertQuery, defaultModelDeleteQuery
       -- * Helper functions and miscellaneous internals
@@ -43,6 +40,7 @@ import Control.Monad
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Char8 as S8
 import Data.Char
+import Data.Data
 import Data.Int
 import Data.Monoid
 import Data.List hiding (find)
@@ -84,7 +82,7 @@ type DBKeyType = Int64
 -- If you wish to store a `Model`'s primary key as a reference in
 -- another 'Model', do not copy the 'DBKey' structure.  Use 'mkDBRef'
 -- to convert the `Model`'s primary key to a foreign key reference.
-data DBKey = DBKey !DBKeyType | NullKey deriving (Typeable)
+data DBKey = DBKey !DBKeyType | NullKey deriving (Data, Typeable)
 
 instance Eq DBKey where
   (DBKey a) == (DBKey b) = a == b
@@ -115,7 +113,7 @@ isNullKey _       = False
 -- are just type aliases to a generalized reference type @GDBRef@,
 -- where @GDBRef@'s first type argument, @reftype@, is a phantom type
 -- denoting the flavor of reference ('NormalRef' or 'UniqueRef').
-newtype GDBRef reftype table = DBRef DBKeyType deriving (Typeable, Eq)
+newtype GDBRef reftype table = DBRef DBKeyType deriving (Eq, Data, Typeable)
 
 instance (Model t) => Show (GDBRef rt t) where
   showsPrec n (DBRef k) = showsPrec n k
@@ -130,7 +128,7 @@ instance ToField (GDBRef rt t) where
   toField (DBRef k) = toField k
 
 -- | See 'GDBRef'.
-data NormalRef = NormalRef deriving (Show, Typeable)
+data NormalRef = NormalRef deriving (Show, Data, Typeable)
 -- | @DBRef@ is a type alias of kind @* -> *@.  The type @DBRef T@
 -- references an instance of type @T@ by the primary key of its
 -- database row.  The type argument @T@ should be an instance of
@@ -138,7 +136,7 @@ data NormalRef = NormalRef deriving (Show, Typeable)
 type DBRef = GDBRef NormalRef
 
 -- | See 'GDBRef'.
-data UniqueRef = UniqueRef deriving (Show, Typeable)
+data UniqueRef = UniqueRef deriving (Show, Data, Typeable)
 -- | A @DBURef T@ is like a @'DBRef' T@, but with an added uniqeuness
 -- constraint.  In other words, if type @A@ contains a @DBURef B@,
 -- then each @B@ has one (or at most one) @A@ associated with it.  By
@@ -383,14 +381,55 @@ toUnderscore skipFirst | skipFirst = S8.pack . skip . S8.unpack
         go False (h:t)               = '_' : toLower h : go True t
 
 
-
-data ModelQueries a = ModelQueries {
+-- | Quoted SQL identifiers for the table and column names.  For
+-- normal models, these will simply be quoted versions of the fields
+-- in the corresponding 'ModelInfo'.  However, for special cases such
+-- as joins or 'As' aliases, the fields of this structure can contain
+-- unquoted SQL keywords modifying quoted table and column
+-- identifiers.
+data ModelIdentifiers a = ModelIdentifiers {
     modelQTable :: !S.ByteString
     -- ^ SQL quoted identifier for the name of the table.
   , modelQColumns :: ![S.ByteString]
     -- ^ Fully-qualified and quoted SQL identifier names of all the
     -- columns.
-  , modelLookupQuery :: !Query
+  , modelQPrimaryColumn :: S.ByteString
+    -- ^ Fully-qualified and quoted SQL identifier name of the columns
+    -- containing the primary key.
+  , modelQWriteColumns :: [S.ByteString]
+    -- ^ SQL identifier names of all the columns except the primary
+    -- key (i.e., columns that should be updated on a write).
+  } deriving (Show)
+
+-- | Quote a SQL identifier (such as a column or field name) with
+-- double quotes.  Note this has nothing to do with quoting /values/,
+-- which must be quoted using single quotes.  (Anyway, all values
+-- should be passed as query parameters, meaning @postgresql-simple@
+-- will handle quoting them.)
+quoteIdent :: S.ByteString -> S.ByteString
+quoteIdent iden = fromString $ '"' : (go $ S8.unpack iden)
+  where go ('"':cs) = '"':'"':go cs
+        go ('\0':_) = error $ "q: illegal NUL character in " ++ show iden
+        go (c:cs)   = c:go cs
+        go []       = '"':[]
+
+-- | The default simply quotes the 'modelInfo' and 'modelColumns'
+-- fields of 'ModelInfo' using 'quoteIdent'.
+defaultModelIdentifiers :: ModelInfo a -> ModelIdentifiers a
+defaultModelIdentifiers mi = ModelIdentifiers {
+    modelQTable = qtable
+  , modelQColumns = qcols
+  , modelQPrimaryColumn = qcols !! pki
+  , modelQWriteColumns = deleteAt pki qcols
+  }
+  where qtable = quoteIdent (modelTable mi)
+        qcol c = S.concat [qtable, ".", quoteIdent c]
+        qcols = map qcol $ modelColumns mi
+        pki = modelPrimaryColumn mi
+
+
+data ModelQueries a = ModelQueries {
+    modelLookupQuery :: !Query
     -- ^ A query template for looking up a model by its primary key.
     -- Should expect a single query parameter, namely the 'DBKey'
     -- being looked up.
@@ -412,70 +451,38 @@ data ModelQueries a = ModelQueries {
     -- row to delete.
   } deriving (Show)
 
--- | Quote a SQL identifier (such as a column or field name) with
--- double quotes.  Note this has nothing to do with quoting /values/,
--- which must be quoted using single quotes.  (Anyway, all values
--- should be passed as query parameters, meaning @postgresql-simple@
--- will handle quoting them.)
-quoteIdent :: S.ByteString -> S.ByteString
-quoteIdent iden = fromString $ '"' : (go $ S8.unpack iden)
-  where go ('"':cs) = '"':'"':go cs
-        go ('\0':_) = error $ "q: illegal NUL character in " ++ show iden
-        go (c:cs)   = c:go cs
-        go []       = '"':[]
-
-q :: S.ByteString -> S.ByteString
-q = quoteIdent
-
-fmtCols :: Bool -> [S.ByteString] -> S.ByteString
-fmtCols False cs = S.intercalate ", " (map q cs)
-fmtCols True cs = "(" <> fmtCols False cs <> ")"
-
-defaultModelQTable :: ModelInfo a -> S.ByteString
-defaultModelQTable mi = q $ modelTable mi
-
-defaultModelQColumns :: ModelInfo a -> [S.ByteString]
-defaultModelQColumns mi = map qualify $ modelColumns mi
-  where qt = q $ modelTable mi
-        qualify c = qt <> "." <> q c
-
-defaultModelLookupQuery :: ModelInfo a -> Query
+defaultModelLookupQuery :: ModelIdentifiers a -> Query
 defaultModelLookupQuery mi = Query $ S.concat [
-    "select ", S.intercalate ", " $ defaultModelQColumns mi
-  , " from ", defaultModelQTable mi
-  , " where ", q (modelColumns mi !! modelPrimaryColumn mi), " = ?"
+    "select ", S.intercalate ", " $ modelQColumns mi
+  , " from ", modelQTable mi
+  , " where ", modelQPrimaryColumn mi, " = ?"
   ]
 
-defaultModelUpdateQuery :: ModelInfo a -> Query
+defaultModelUpdateQuery :: ModelIdentifiers a -> Query
 defaultModelUpdateQuery mi = Query $ S.concat [
-    "update ", q (modelTable mi), " set "
-    , S.intercalate ", " (map (\c -> q c <> " = ?") $ deleteAt pki cs)
-    , " where ", q (cs !! pki), " = ?"
+    "update ", modelQTable mi, " set "
+    , S.intercalate ", " $ map (<> " = ?") $ modelQWriteColumns mi
+    , " where ", modelQPrimaryColumn mi, " = ?"
   ]
-  where cs = modelColumns mi                        
-        pki = modelPrimaryColumn mi
 
-defaultModelInsertQuery :: ModelInfo a -> Query
+defaultModelInsertQuery :: ModelIdentifiers a -> Query
 defaultModelInsertQuery mi = Query $ S.concat $ [
-  "insert into ", q (modelTable mi), " ", fmtCols True cs1, " values ("
-  , S.intercalate ", " $ map (const "?") cs1
-  , ") returning ", fmtCols False cs0
+  "insert into ", modelQTable mi
+  , " (", S.intercalate ", " $ modelQWriteColumns mi
+  , ") values (", S.intercalate ", " $ map (const "?") $ modelQWriteColumns mi
+  , ") returning ", S.intercalate ", " $ modelQColumns mi
   ]
-  where cs0 = modelColumns mi
-        cs1 = deleteAt (modelPrimaryColumn mi) cs0
 
-defaultModelDeleteQuery :: ModelInfo a -> Query
+defaultModelDeleteQuery :: ModelIdentifiers a -> Query
 defaultModelDeleteQuery mi = Query $ S.concat [
-  "delete from ", q (modelTable mi), " where "
-  , q (modelColumns mi !! modelPrimaryColumn mi), " = ?"
+  "delete from ", modelQTable mi
+  , " where ", modelQPrimaryColumn mi, " = ?"
   ]
 
 -- | The default value of 'modelQueries'.
-defaultModelQueries :: ModelInfo a -> ModelQueries a
+defaultModelQueries :: ModelIdentifiers a -> ModelQueries a
 defaultModelQueries mi = ModelQueries {
-    modelQTable = defaultModelQTable mi
-  , modelQColumns = defaultModelQColumns mi
-  , modelLookupQuery = defaultModelLookupQuery mi
+    modelLookupQuery = defaultModelLookupQuery mi
   , modelUpdateQuery = defaultModelUpdateQuery mi
   , modelInsertQuery = defaultModelInsertQuery mi
   , modelDeleteQuery = defaultModelDeleteQuery mi
@@ -558,8 +565,12 @@ class Model a where
                        , GDatatypeName (Rep a)) => ModelInfo a
   {-# INLINE modelInfo #-}
   modelInfo = defaultModelInfo
+  modelIdentifiers :: ModelIdentifiers a
+  {-# INLINE modelIdentifiers #-}
+  modelIdentifiers = defaultModelIdentifiers modelInfo
   modelQueries :: ModelQueries a
-  modelQueries = defaultModelQueries modelInfo
+  {-# INLINE modelQueries #-}
+  modelQueries = defaultModelQueries modelIdentifiers
 
 -- | A degenerate instance of model representing a database join.  The
 -- ':.' instance only allows limited queries such as 'findWhere' and
@@ -569,7 +580,8 @@ class Model a where
 -- an error.
 instance (Model a, Model b) => Model (a :. b) where
   modelInfo = joinModelInfo
-  modelQueries = joinModelQueries
+  modelIdentifiers = joinModelIdentifiers
+  modelQueries = error "attempt to perform standard query on join relation"
 
 joinModelInfo :: (Model a, Model b) => ModelInfo (a :. b)
 joinModelInfo = r
@@ -589,20 +601,18 @@ joinModelInfo = r
         err :: a
         err = error $ "illegal use of join relation " ++ S8.unpack jname
 
-joinModelQueries :: (Model a, Model b) => ModelQueries (a :. b)
-joinModelQueries = r
-  where r = ModelQueries {
-            modelQTable = modelQTable qa <> ", " <> modelQTable qb
-          , modelQColumns = modelQColumns qa ++ modelQColumns qb
-          , modelLookupQuery = badQuery
-          , modelUpdateQuery = badQuery
-          , modelInsertQuery = badQuery
-          , modelDeleteQuery = badQuery
+joinModelIdentifiers :: (Model a, Model b) => ModelIdentifiers (a :. b)
+joinModelIdentifiers = r
+  where r = ModelIdentifiers {
+              modelQTable = modelQTable mia <> ", " <> modelQTable mib
+            , modelQColumns = modelQColumns mia ++ modelQColumns mib
+            , modelQWriteColumns = error "attempt to write join relation"
+            , modelQPrimaryColumn =
+              error "attempt to use primary key of join relation"
           }
-        (qa, qb) = (const (modelQueries, modelQueries)
-                    :: (Model a, Model b) => ModelQueries (a :. b)
-                       -> (ModelQueries a, ModelQueries b)) r
-        badQuery = "select illegal_attempt_to_use_join_result_as_model"
+        mia = modelIdentifiers `gAsTypeOf1_2` r
+        mib = modelIdentifiers `gAsTypeOf1_1` r
+
 
 class GUnitType f where
   gUnitTypeName :: f p -> String
@@ -662,7 +672,7 @@ class RowAlias a where
 -- \  ...
 --    r <- 'findWhere' \"bar.bar_key = x.bar_parent\" c () :: IO [Bar :. As X Bar]
 -- @
-newtype As alias row = As { unAs :: row } deriving (Show, Typeable)
+newtype As alias row = As { unAs :: row } deriving (Show)
 
 -- | @fromAs@ extracts the @row@ from an @'As' alias row@, but
 -- constrains the type of @alias@ to be the same as its first argument
@@ -678,24 +688,36 @@ newtype As alias row = As { unAs :: row } deriving (Show, Typeable)
 fromAs :: alias -> As alias row -> row
 fromAs _ (As row) = row
 
+aliasModelInfo :: ModelInfo a -> ModelInfo (As alias a)
+aliasModelInfo inner
+  | not (modelIsTable inner) =
+    error "As constructor must be applied to simple tables"
+  | otherwise = inner {
+      modelGetPrimaryKey = \(As a) -> modelGetPrimaryKey inner a
+    , modelRead = As <$> modelRead inner
+    , modelWrite = const $ error "illegal attempt to write alias as model"
+    }
+
+aliasModelIdentifiers :: (RowAlias alias) => ModelInfo (As alias a)
+                         -> ModelIdentifiers (As alias a)
+aliasModelIdentifiers mi = ModelIdentifiers {
+    modelQTable = S.concat [qtable, " AS ", alias]
+  , modelQColumns = qcols
+  , modelQPrimaryColumn = qcols !! pki
+  , modelQWriteColumns = deleteAt pki qcols
+  }
+  where qtable = quoteIdent (modelTable mi)
+        alias = quoteIdent $ rowAliasName $ undef1 mi
+        qcol c = S.concat [alias, ".", quoteIdent c]
+        qcols = map qcol $ modelColumns mi
+        pki = modelPrimaryColumn mi
+
 instance (Model a, RowAlias as) => Model (As as a) where
   {-# INLINE modelInfo #-}
-  modelInfo
-    | not (modelIsTable inner) =
-        error "As constructor must be applied to simple tables"
-    | otherwise = inner {
-        modelGetPrimaryKey = \(As a) -> modelGetPrimaryKey inner a
-      , modelRead = As <$> modelRead inner
-      , modelWrite = const $ error "illegal attempt to write alias as model"
-      , modelIsTable = False
-      }
-    where inner = modelInfo
-  {-# INLINE modelQueries #-}
-  modelQueries = qs
-    where alias = rowAliasName $ undef1 qs
-          mi = modelInfo `gAsTypeOf1` qs
-          qs = (defaultModelQueries mi { modelTable = alias })
-               { modelQTable = q (modelTable mi) <> " as " <> q alias }
+  modelInfo = aliasModelInfo modelInfo
+  {-# INLINE modelIdentifiers #-}
+  modelIdentifiers = aliasModelIdentifiers modelInfo
+  modelQueries = error "attempt to perform standard query on AS table alias"
 
 
 -- | Lookup the 'modelTable' of a 'Model' (@modelName = 'modelTable'
@@ -712,36 +734,26 @@ primaryKey a = modelGetPrimaryKey modelInfo a
 -- | Generate a SQL @SELECT@ statement with no @WHERE@ predicate.  For
 -- example, 'defaultModelLookupQuery' consists of
 -- @modelSelectFragment@ followed by \"@WHERE@ /primary-key/ = ?\".
-modelSelectFragment :: ModelQueries a -> S.ByteString
-modelSelectFragment qs = S.concat [
-  "select ", S.intercalate ", " $ modelQColumns qs , " from ", modelQTable qs ]
-
--- | Retreive a quoted and fully-qualified name of the column storing
--- a model's primary keys.
-modelQKey :: (Model a) => g a -> S.ByteString
-modelQKey ga
-  | n < 0 = error $ "modelQKey: " ++ S8.unpack (modelTable mi) ++
-            " has no primary key"
-  | otherwise = modelQColumns (modelQueries `gAsTypeOf1` ga) !! n
-  where mi = modelInfo `gAsTypeOf1` ga
-        n = modelPrimaryColumn mi
+modelSelectFragment :: ModelIdentifiers a -> S.ByteString
+modelSelectFragment mi = S.concat [
+ "select ", S.intercalate ", " $ modelQColumns mi , " from ", modelQTable mi ]
 
 -- | A newtype wrapper in the 'FromRow' class, permitting every model
 -- to used as the result of a database query.
-newtype LookupRow a = LookupRow { lookupRow :: a } deriving (Show, Typeable)
+newtype LookupRow a = LookupRow { lookupRow :: a } deriving (Show)
 instance (Model a) => FromRow (LookupRow a) where
   fromRow = LookupRow <$> modelRead modelInfo
 
 -- | A newtype wrapper in the 'ToRow' class, which marshalls every
 -- field except the primary key.  For use with 'modelInsertQuery'.
-newtype InsertRow a = InsertRow a deriving (Show, Typeable)
+newtype InsertRow a = InsertRow a deriving (Show)
 instance (Model a) => ToRow (InsertRow a) where
   toRow (InsertRow a) = modelWrite modelInfo a
 
 -- | A newtype wrapper in the 'ToRow' class, which marshalls every
 -- field except the primary key, followed by the primary key.  For use
 -- with 'modelUpdateQuery'.
-newtype UpdateRow a = UpdateRow a deriving (Show, Typeable)
+newtype UpdateRow a = UpdateRow a deriving (Show)
 instance (Model a) => ToRow (UpdateRow a) where
   toRow (UpdateRow a) = toRow $ InsertRow a :. Only (primaryKey a)
 
@@ -769,7 +781,8 @@ find = findRow
 findWhere :: (ToRow parms, Model r) => Query -> Connection -> parms -> IO [r]
 {-# INLINE findWhere #-}
 findWhere (Query whereClause) c parms = action
-  where sel = Query $ modelSelectFragment (modelQueries `gAsTypeOf1_1` action)
+  where sel = Query $ modelSelectFragment
+              (modelIdentifiers `gAsTypeOf1_1` action)
               <> " where " <> whereClause
         action = do rs <- query c sel parms
                     return $ map lookupRow rs
@@ -777,7 +790,7 @@ findWhere (Query whereClause) c parms = action
 -- | Return an entire database table.
 findAll :: (Model r) => Connection -> IO [r]
 findAll c = action
-  where qs = modelQueries `gAsTypeOf1_1` action
+  where qs = modelIdentifiers `gAsTypeOf1_1` action
         action = do rs <- query_ c (Query $ modelSelectFragment qs)
                     return $ map lookupRow rs
 
