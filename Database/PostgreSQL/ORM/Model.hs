@@ -14,7 +14,7 @@ module Database.PostgreSQL.ORM.Model (
     , DBRef, DBRefUnique, GDBRef(..), mkDBRef
     , As(..), fromAs, RowAlias(..)
       -- * Database operations on Models
-    , findRow, find, findWhere, findAll
+    , findRow, find, findWhere, findWhere_, findAll
     , save, destroy, destroyByRef
       -- * Functions for accessing and using Models
     , modelName, primaryKey, modelSelectFragment
@@ -683,7 +683,7 @@ class RowAlias a where
 --instance 'RowAlias' X where rowAliasName = const \"x\"
 --
 -- \  ...
---    r <- 'findWhere' \"bar.bar_key = x.bar_parent\" c () :: IO [Bar :. As X Bar]
+--    r <- 'findWhere_' \"bar.bar_key = x.bar_parent\" c () :: IO [Bar :. As X Bar]
 -- @
 newtype As alias row = As { unAs :: row } deriving (Show)
 
@@ -802,6 +802,16 @@ findWhere (Query whereClause) c parms = action
               (modelIdentifiers `gAsTypeOf1_1` action)
               <> " where " <> whereClause
         action = do rs <- query c sel parms
+                    return $ map lookupRow rs
+
+-- | A variant of 'findWhere' that does not require query parameters.
+findWhere_ :: (Model r) => Query -> Connection -> IO [r]
+{-# INLINE findWhere_ #-}
+findWhere_ (Query whereClause) c = action
+  where sel = Query $ modelSelectFragment
+              (modelIdentifiers `gAsTypeOf1_1` action)
+              <> " where " <> whereClause
+        action = do rs <- query_ c sel
                     return $ map lookupRow rs
 
 -- | Return an entire database table.
