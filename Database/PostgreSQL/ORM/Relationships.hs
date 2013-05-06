@@ -94,8 +94,7 @@ defaultChildQuery :: (Model child) =>
                      DBRefInfo rt child parent -> DBRefQuery rt child parent
 defaultChildQuery ri = DBRefQuery $ Query $ S.concat [
   modelSelectFragment cq, " where ", quoteIdent (dbrefColumn ri), " = ?"]
-  where cq = (const modelQueries
-              :: Model c => DBRefInfo rt c p -> ModelQueries c) ri
+  where cq = modelIdentifiers `gAsTypeOf2` ri
 
 class (Model parent, Model child) => HasMany parent child where
   hasManyInfo :: DBRefInfo NormalRef child parent
@@ -203,7 +202,7 @@ defaultjtLookupQuery jt = Query $ S.concat [
   , " where ", quoteIdent (jtTable jt), ".", quoteIdent (jtColumnA jt)
   , " = ?"
   ]
-  where bq = modelQueries `gAsTypeOf1` jt
+  where bq = modelIdentifiers `gAsTypeOf1` jt
         bi = modelInfo `gAsTypeOf1` jt
 
 -- | Creates a query for adding a join relationsihp to the table.  If

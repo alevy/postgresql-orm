@@ -44,7 +44,6 @@ import Data.Data
 import Data.Int
 import Data.Monoid
 import Data.List hiding (find)
-import Data.Typeable
 import Data.String
 import Database.PostgreSQL.Simple
 import Database.PostgreSQL.Simple.FromField
