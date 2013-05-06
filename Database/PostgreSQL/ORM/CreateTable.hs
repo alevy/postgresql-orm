@@ -83,15 +83,15 @@ mkFoo :: String -> Foo
 mkFoo = Foo NullKey
 
 data Bar = Bar {
-    bar_key :: !DBKey
-  , bar_none :: !(Maybe Int32)
-  , bar_name :: !String
-  , bar_parent :: !(Maybe (DBRef Bar))
+    barKey :: !DBKey
+  , barLongFieldName :: !(Maybe Int32)
+  , barName :: !String
+  , barParent :: !(Maybe (DBRef Bar))
   } deriving (Show, Generic)
 
-instance Model Bar
+instance Model Bar where modelInfo = underscoreModelInfo "bar"
 instance CreateTable Bar where
-  createTableTypes _ = [("barString", "varchar(16)")]
+  createTableTypes _ = [("bar_string", "varchar(16)")]
 
 mkBar :: String -> Bar
 mkBar msg = Bar NullKey (Just n) msg Nothing

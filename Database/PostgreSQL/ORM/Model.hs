@@ -10,6 +10,7 @@
 module Database.PostgreSQL.ORM.Model (
       -- * The Model class
       Model(..), ModelInfo(..), ModelQueries(..)
+    , underscoreModelInfo
       -- * Data types for holding primary keys
     , DBKey(..), isNullKey
     , DBRef, DBRefUnique, GDBRef(..), mkDBRef
@@ -31,6 +32,7 @@ module Database.PostgreSQL.ORM.Model (
     , defaultModelInsertQuery, defaultModelDeleteQuery
       -- * Helper functions and miscellaneous internals
     , quoteIdent, NormalRef(..), UniqueRef(..)
+    , GPrimaryKey0(..), GColumns(..), GDatatypeName(..)
     , printq
       -- * Low-level functions for generic FromRow/ToRow
     , GFromRow(..), defaultFromRow, GToRow(..), defaultToRow
@@ -217,19 +219,6 @@ defaultModelTable :: (Generic a, GDatatypeName (Rep a)) => a -> S.ByteString
 defaultModelTable = fromString . caseFold. gDatatypeName . from
   where caseFold (h:t) = toLower h:t
         caseFold s     = s
-{-
--- | The default name of the database table corresponding to a Haskell
--- type.  The default is the same as the type name, unless the first
--- letter is the only capital letter, in which case the first letter
--- is downcased.  (The rationale is that Haskell requires a
--- capitalized letter, but all-lower-case table names are slightly
--- easier to manipulate manually in PostgreSQL because they require
--- less quoting.)
-defaultModelTable :: (Generic a, GDatatypeName (Rep a)) => a -> S.ByteString
-defaultModelTable = fromString . maybeFold. gDatatypeName . from
-  where maybeFold s | h:t <- s, not (any isUpper t) = toLower h:t
-                    | otherwise                     = s
--}
 
 class GColumns f where
   gColumns :: f p -> [S.ByteString]
@@ -252,20 +241,24 @@ defaultModelColumns = gColumns . from
 -- of this class, then move the 'DBKey' first in your data structure.
 class GPrimaryKey0 f where
   gPrimaryKey0 :: f p -> DBKey
-instance (Selector c, RequireSelector c) =>
-         GPrimaryKey0 (M1 S c (K1 i DBKey)) where
+instance (RequireSelector c) => GPrimaryKey0 (S1 c (K1 i DBKey)) where
+  {-# INLINE gPrimaryKey0 #-}
   gPrimaryKey0 (M1 (K1 k)) = k
 instance (GPrimaryKey0 a) => GPrimaryKey0 (a :*: b) where
+  {-# INLINE gPrimaryKey0 #-}
   gPrimaryKey0 (a :*: _) = gPrimaryKey0 a
-instance (GPrimaryKey0 f) => GPrimaryKey0 (M1 C c f) where
+instance (GPrimaryKey0 f) => GPrimaryKey0 (C1 c f) where
+  {-# INLINE gPrimaryKey0 #-}
   gPrimaryKey0 (M1 fp) = gPrimaryKey0 fp
-instance (GPrimaryKey0 f) => GPrimaryKey0 (M1 D c f) where
+instance (GPrimaryKey0 f) => GPrimaryKey0 (D1 c f) where
+  {-# INLINE gPrimaryKey0 #-}
   gPrimaryKey0 (M1 fp) = gPrimaryKey0 fp
 
 -- | Extract the primary key of type 'DBKey' from a model when the
 -- 'DBKey' is the first element of the data structure.  Fails to
 -- compile if the first field is not of type 'DBKey'.
 defaultModelGetPrimaryKey :: (Generic a, GPrimaryKey0 (Rep a)) => a -> DBKey
+{-# INLINE defaultModelGetPrimaryKey #-}
 defaultModelGetPrimaryKey = gPrimaryKey0 . from
 
 
@@ -336,20 +329,59 @@ defaultModelInfo :: (Generic a, GToRow (Rep a), GFromRow (Rep a)
                     , GPrimaryKey0 (Rep a), GColumns (Rep a)
                     , GDatatypeName (Rep a)) => ModelInfo a
 defaultModelInfo = m
-  where m = ModelInfo { modelTable = mname
-                      , modelColumns = cols
+  where m = ModelInfo { modelTable = defaultModelTable a
+                      , modelColumns = defaultModelColumns a
                       , modelPrimaryColumn = pki
                       , modelGetPrimaryKey = defaultModelGetPrimaryKey
                       , modelRead = defaultModelRead
                       , modelWrite = defaultModelWrite pki
                       , modelIsTable = True
                       }
-        unModel :: ModelInfo a -> a
-        unModel _ = undefined
-        a = unModel m
-        mname = defaultModelTable a
+        a = undef1 m
         pki = 0
-        cols = defaultModelColumns a
+
+-- | An alternate 'Model' pattern in which Haskell type and field
+-- names are converted from camel-case to underscore notation.  The
+-- first argument is a prefix to be removed from field names (since
+-- Haskell requires field names to be unique across data types, while
+-- SQL allows the same column names to be used in different tables).
+--
+-- For example:
+--
+-- > data Bar = Bar {
+-- >     barId :: !DBKey
+-- >   , barNameOfBar :: !String
+-- >   , barParent :: !(Maybe (DBRef Bar))
+-- >   } deriving (Show, Generic)
+-- >
+-- > instance Model Bar where modelInfo = underscoreModelInfo "bar"
+--
+-- would associate type @Bar@ with a database table called @bar@ with
+-- fields @id@, @name_of_bar@, and @parent@.
+underscoreModelInfo :: (Generic a, GToRow (Rep a), GFromRow (Rep a)
+                       , GPrimaryKey0 (Rep a), GColumns (Rep a)
+                       , GDatatypeName (Rep a)) =>
+                       S.ByteString -> ModelInfo a
+underscoreModelInfo prefix = def {
+      modelTable = toUnderscore True $ modelTable def
+    , modelColumns = map fixCol $ modelColumns def
+    }
+  where def = defaultModelInfo
+        plen = S.length prefix
+        fixCol c = toUnderscore False $ stripped
+          where stripped | prefix `S.isPrefixOf` c = S.drop plen c
+                         | otherwise               = c
+
+toUnderscore :: Bool -> S.ByteString -> S.ByteString
+toUnderscore skipFirst | skipFirst = S8.pack . skip . S8.unpack
+                       | otherwise = S8.pack . go True . S8.unpack
+  where skip "" = ""
+        skip (h:t) = toLower h : go True t
+        go _ ""                      = ""
+        go _ (h:t) | not (isUpper h) = h : go False t
+        go True (h:t)                = toLower h : go True t
+        go False (h:t)               = '_' : toLower h : go True t
+
 
 
 data ModelQueries a = ModelQueries {
@@ -501,15 +533,18 @@ defaultModelQueries mi = ModelQueries {
 -- >       modelInfo = defaultModelInfo { modelTable = "my_type" }
 --
 -- Finally, if you dislike the conventions followed by
--- 'defaultModelInfo', you can simply implement an alternate pattern,
--- say @someOtherPattern@, and use it in place of the default:
+-- 'defaultModelInfo', you can simply implement an alternate pattern.
+-- For example, this module contains a function 'underscoreModelInfo'
+-- that strips a prefix from field names and converts everything from
+-- camel-case to underscore notation:
 --
--- >   instance Model MyType where modelInfo = someOtherPattern
+-- >   instance Model MyType where
+-- >       modelInfo = underscoreModelInfo "myTypePrefix"
 --
--- You can implement @someOtherPattern@ in terms of
--- 'defaultModelInfo', or use some of the lower-level functions from
--- which 'defaultModelInfo' is built.  Each component default function
--- is separately exposed (e.g., 'defaultModelTable',
+-- You can implement your own functions like 'underscoreModelInfo' in
+-- terms of 'defaultModelInfo', or use some of the lower-level
+-- functions from which 'defaultModelInfo' is built.  Each component
+-- default function is separately exposed (e.g., 'defaultModelTable',
 -- 'defaultModelColumns', 'defaultModelGetPrimaryKey', etc.).
 --
 -- The default queries are simiarly provided by a default function
@@ -779,13 +814,6 @@ destroy c a =
 destroyByRef :: (Model a) => Connection -> GDBRef rt a -> IO ()
 destroyByRef c a =
   void $ execute c (modelDeleteQuery $ modelQueries `gAsTypeOf1` a) (Only a)
-
-deCamel :: String -> String
-deCamel = go True
-  where go _ ""                      = ""
-        go _ (h:t) | not (isUpper h) = h : go False t
-        go True (h:t)                = toLower h : go True t
-        go False (h:t)               = '_' : toLower h : go True t
 
 printq :: Query -> IO ()
 printq (Query bs) = S8.putStrLn bs
