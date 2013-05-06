@@ -120,6 +120,7 @@ setLocalDB dir0 = do
   dir1 <- canonicalizePath dir0
   setEnv "PGHOST" dir1 True
   setEnv "PGDATA" dir1 True
+  setEnv "PGDATABASE" "postgres" True
   let dir = showCommandForUser dir1 []
   msh <- getEnv "SHELL"
   return $ case msh of Just sh | isSuffixOf "csh" sh ->
