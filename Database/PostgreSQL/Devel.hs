@@ -2,7 +2,9 @@
 -- | Functions for initializing self-contained local postgreSQL
 -- database clusters (useful in development more than production).
 module Database.PostgreSQL.Devel (
-    initLocalDB, stopLocalDB, setLocalDB, withTempDB
+      createLocalDB, configLocalDB, startLocalDB
+    , initLocalDB, stopLocalDB, setLocalDB
+    , withTempDB
   ) where
 
 import Control.Exception
@@ -37,6 +39,26 @@ addDirectives directives (cl:cls)
           | [(d,_)] <- lex cl                 = (False, d)
           | otherwise                         = (False, "")
 
+-- | Set configuration parameters on a database by editing the
+-- @postgresql.conf@ file.  Takes the database directory and a list of
+-- @(@/parameter/@,@ /full-line/@)@ pairs.  For example, when creating
+-- a throw-away database cluster, you later intend to discard, you
+-- might say:
+--
+-- > configLocalDB dbpath [("fsync", "fsync = off")]
+--
+-- Note that the second element of each pair is the complete
+-- configuration line.  It is not correct to say:
+--
+-- > configLocalDB dbpath [("fsync", "off")]   -- INCORRECT
+--
+configLocalDB :: FilePath -> [(String, String)] -> IO ()
+configLocalDB dir directives = do
+  let confpath = dir </> "postgresql.conf"
+  oldconf <- lines <$> readFile confpath
+  let conf = unlines $ addDirectives directives oldconf
+  length conf `seq` writeFile confpath conf
+
 pgDirectives :: FilePath -> [(String, String)]
 pgDirectives dir = [
     ("unix_socket_directory", "unix_socket_directory = '" ++ q dir ++ "'")
@@ -46,6 +68,29 @@ pgDirectives dir = [
         q (h:t)    = h : q t
         q []       = ""
 
+-- | Create a directory for a local database cluster entirely
+-- self-contained within one directory.  This is accomplished by
+-- creating a new PostgreSQL database cluster in the directory and
+-- setting the following configuration options in @postgresql.conf@:
+--
+-- * @unix_socket_directory@ is set to the database directory itself,
+--   so that no permissions are required on global directories such as
+--   @\/var\/run@.
+--
+-- * @listen_address@ is set to empty (i.e., @\'\'@), so that no TCP
+-- socket is bound, avoiding conflicts with any other running instaces
+-- of PostgreSQL.
+--
+-- * @logging_collector@ is set to @yes@, so that all message logs are
+--   kept in the @pg_log@ subdirectory of the directory you specified.
+--
+-- Note this function does /not/ start a postgres server after
+-- creating the directory.  You will seperately need to start the
+-- server using 'startLocalDB' or 'initLocalDB'.  (And note that
+-- 'initLocalDB' already calls @createLocalDB@ if the directory does
+-- not exist or is empty.  Hence the primary use of this function is
+-- if you want to call 'configLocalDB' between 'createLocalDB' and
+-- 'startLocalDB'.)
 createLocalDB :: FilePath -> IO ()
 createLocalDB dir = do
   (exit, _, err) <- readProcessWithExitCode "pg_ctl"
@@ -56,11 +101,7 @@ createLocalDB dir = do
     "## IMPORTANT:  Run the following command before deleting this " ++
     "directory ##\n\n" ++
     "pg_ctl -D " ++ showCommandForUser dir' [] ++ " stop -m immediate\n\n"
-  let confpath = dir </> "postgresql.conf"
-  oldconf <- lines <$> readFile confpath
-  let conf = unlines $ addDirectives (pgDirectives dir') oldconf
-  length conf `seq` writeFile confpath conf
-  return ()
+  configLocalDB dir $ pgDirectives dir'
 
 systemNoStdout :: String -> [String] -> IO ExitCode
 systemNoStdout prog args =
@@ -70,23 +111,12 @@ systemNoStdout prog args =
     (_,_,_,pid) <- createProcess cp
     waitForProcess pid
 
--- | Initialize a local database cluster entirely self-contained
--- within one directory.  If a database already exists in the
--- directory, then start the postgres server if necessary.  Either way
--- returns a 'ConnectInfo' that will connect to this local database.
---
--- Note that if @initLocalDB@ starts a postgres server, the server
--- process will continue running after the process exits.  This is
--- normally fine.  Since multiple client processes may access the same
--- postgres database, it makes sense for the first client to start the
--- database and no one to stop it.  See 'stopLocalDB' if you wish to
--- stop the server process (which you should always do before deleting
--- a test cluster).  See also 'withTempDB' to create a temporary
--- cluster for a test suite.
-initLocalDB :: FilePath -> IO ConnectInfo
-initLocalDB dir0 = do
-  exists <- isNonEmptyDir dir0
-  unless exists $ createLocalDB dir0
+-- | Start a local database if the server is not already running.
+-- Otherwise, does nothing, but returns a 'ConnectInfo' in either
+-- case.  The database server will continue running after the current
+-- process exits (but see 'stopLocalDB').
+startLocalDB :: FilePath -> IO ConnectInfo
+startLocalDB dir0 = do
   dir <- canonicalizePath dir0
   (e0, _, _) <- readProcessWithExitCode "pg_ctl" ["status", "-D", dir] ""
   when (e0 /= ExitSuccess) $ do
@@ -96,6 +126,30 @@ initLocalDB dir0 = do
                             , connectUser = ""
                             , connectDatabase = "postgres"
                             }
+
+-- | A combination of 'createLocalDB' and 'startLocalDB'.
+--
+-- The parameter is a PostgreSQL data directory.  If the directory is
+-- empty or does not exist, this function creates a new database
+-- cluster (via 'createLocalDB').  Then, if a database server is not
+-- already running for the directory, starts a server.  No matter
+-- what, returns a 'ConnectInfo' that will connect to the server
+-- running on this local database.
+--
+-- Note that if @initLocalDB@ starts a postgres server, the server
+-- process will continue running after the process that called
+-- @initLocalDB@ exits.  This is normally fine.  Since multiple client
+-- processes may access the same PostgreSQL database, it makes sense
+-- for the first client to start the database and no one to stop it.
+-- See 'stopLocalDB' if you wish to stop the server process (which you
+-- should always do before deleting a test cluster).  See also
+-- 'withTempDB' to create a temporary cluster for the purposes of
+-- running a test suite.
+initLocalDB :: FilePath -> IO ConnectInfo
+initLocalDB dir = do
+  exists <- isNonEmptyDir dir
+  unless exists $ createLocalDB dir
+  startLocalDB dir
 
 -- | Stop the server for a local database cluster entirely
 -- self-contained within one directory.  You must call this before
@@ -133,7 +187,12 @@ setLocalDB dir0 = do
 -- test suites.
 withTempDB :: (ConnectInfo -> IO a) -> IO a
 withTempDB f = bracket createdir removeDirectoryRecursive $ \d ->
-  (initLocalDB d >>= f) `finally` stopLocalDB d
+  flip finally (stopLocalDB d) $ do
+    createLocalDB d
+    configLocalDB d [("fsync", "fsync = off")
+                    , ("synchronous_commit", "synchronous_commit = off")
+                    , ("full_page_writes", "full_page_writes = off")]
+    initLocalDB d >>= f
   where createdir = do
           tmp <- getTemporaryDirectory
           mkdtemp $ tmp </> "db."

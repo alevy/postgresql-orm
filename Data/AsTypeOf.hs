@@ -14,13 +14,14 @@
 --   >    undef3 :: g a b c -> a
 --
 --   * @undef/M/_/N/@ is equivalent to @undef/N/ . undef/M/@ -- i.e.,
---   the @/M/@th type argument of the @/N/@th type argument.  For
+--   the @/N/@th type argument of the @/M/@th type argument.  For
 --   example:
 --
 --   >    undef1_2 :: g1 (g a b) -> a
 --   >    undef2_1 :: g1 (g a) b1 -> a
 --
---   * @asTypeOf/N/@ is equivalent to @\\a t -> a `asTypeOf` undef/N/ t@.
+--   * @asTypeOf/N/@ is equivalent to @\\a t -> a ``asTypeOf``
+--   undef/N/ t@.
 --
 --   * @gAsTypeOf/N/@ is like @asTypeOf/N/@, but constraints a type
 --   argument rather than a type.  This is analogous to 'gcast'
