@@ -5,6 +5,17 @@ build-type: Simple
 license: GPL
 author: Amit Levy and David Mazieres
 
+executable pg_migrate
+  default-language: Haskell2010
+  Main-is: pg_migrate.hs
+  ghc-options: -Wall
+  build-depends: base < 6
+               , bytestring
+               , directory
+               , filepath
+               , postgresql-simple
+               , process
+
 library
   default-language: Haskell2010
   build-depends: base < 6
@@ -21,6 +32,7 @@ library
                  , Data.HasField
                  , Data.RequireSelector
                  , Database.PostgreSQL.Devel
+                 , Database.PostgreSQL.Migration
                  , Database.PostgreSQL.ORM.CreateTable
                  , Database.PostgreSQL.ORM.Model
                  , Database.PostgreSQL.ORM.Relationships
