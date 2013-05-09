@@ -36,13 +36,18 @@ main = do
 
 dumpDb :: Handle -> IO ExitCode
 dumpDb outputFile = do
+  dbUrl <- getEnvironment >>= return . maybe "" id . lookup "DATABASE_URL"
   (_, out, err, ph) <- runInteractiveProcess "pg_dump"
-                        ["--schema-only"] Nothing Nothing
+                        [dbUrl, "--schema-only", "-O", "-x"] Nothing Nothing
   exitCode <- waitForProcess ph
   if exitCode /= ExitSuccess then do
-    S8.hGetContents err >>= S8.hPut outputFile
+    S8.hGetContents err >>= S8.hPut stderr
     else do
-      S8.hGetContents out >>= S8.hPut stderr
+      raw <- S8.hGetContents out
+      let clean = S8.concat $ intersperse "\n" $
+                    filter ((/= "--") . (S8.take 2)) $
+                    S8.lines raw
+      S8.hPut outputFile clean
   return exitCode
 
 initializeDb :: IO ExitCode
@@ -63,7 +68,7 @@ runMigrationsForDir dir = do
   migrations <- getDirectoryMigrations dir >>=
                     return . (dropWhile (isVersion (<= latestVersion)))
   go migrations
-  where go [] = return ExitSuccess
+  where go [] = withFile (dir </> ".." </> "schema.sql") WriteMode dumpDb
         go (MigrationDetails file version name:fs) = do
               putStrLn $ "=== Running Migration " ++ name
               exitCode <- rawSystem "runghc"
@@ -93,7 +98,7 @@ runRollbackForDir dir = do
                 , "--with-db-commit"]
   if exitCode == ExitSuccess then do
     putStrLn "=== Success"
-    return $ ExitSuccess
+    withFile (dir </> ".." </> "schema.sql") WriteMode dumpDb
     else do
       putStrLn "=== Migration Failed!"
       return exitCode
