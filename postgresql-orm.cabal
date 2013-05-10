@@ -22,18 +22,23 @@ library
                , bytestring
                , directory
                , filepath
+               , monad-control
                , postgresql-simple
                , process
+               , resource-pool
                , text
                , time
+               , transformers
                , unix
   ghc-options: -Wall
   exposed-modules: Data.AsTypeOf
                  , Data.HasField
                  , Data.RequireSelector
+                 , Database.PostgreSQL.Connection
                  , Database.PostgreSQL.Devel
                  , Database.PostgreSQL.Migration
                  , Database.PostgreSQL.ORM.CreateTable
+                 , Database.PostgreSQL.ORM.DSL
                  , Database.PostgreSQL.ORM.Model
                  , Database.PostgreSQL.ORM.Relationships
                  , Database.PostgreSQL.ORM.SqlType
