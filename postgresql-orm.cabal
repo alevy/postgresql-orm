@@ -34,6 +34,7 @@ library
                  , Data.HasField
                  , Data.RequireSelector
                  , Database.PostgreSQL.Devel
+                 , Database.PostgreSQL.Describe
                  , Database.PostgreSQL.Migration
                  , Database.PostgreSQL.ORM.CreateTable
                  , Database.PostgreSQL.ORM.DSL
