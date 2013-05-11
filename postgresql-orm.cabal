@@ -22,10 +22,8 @@ library
                , bytestring
                , directory
                , filepath
-               , monad-control
                , postgresql-simple
                , process
-               , resource-pool
                , text
                , time
                , transformers
@@ -34,7 +32,6 @@ library
   exposed-modules: Data.AsTypeOf
                  , Data.HasField
                  , Data.RequireSelector
-                 , Database.PostgreSQL.Connection
                  , Database.PostgreSQL.Devel
                  , Database.PostgreSQL.Migration
                  , Database.PostgreSQL.ORM.CreateTable
