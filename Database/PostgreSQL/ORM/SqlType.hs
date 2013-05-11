@@ -11,6 +11,8 @@ import Data.Monoid
 import qualified Data.Text as ST
 import qualified Data.Text.Lazy as LT
 import Data.Time
+import Data.Typeable
+import qualified Data.Vector as V
 import Database.PostgreSQL.Simple
 import Database.PostgreSQL.Simple.FromField
 import Database.PostgreSQL.Simple.Time
@@ -71,6 +73,9 @@ instance SqlType DBKey where
 instance (SqlType a) => SqlType (Maybe a) where
   sqlType ~(Just a) = sqlBaseType a
   sqlBaseType _ = error "Table field Maybe should not be wrapped in other type"
+
+instance (Typeable a, SqlType a) => SqlType (V.Vector a) where
+  sqlBaseType va = sqlBaseType (undef1 va) <> "[]"
 
 instance (Model a) => SqlType (DBRef a) where
   sqlBaseType r@(DBRef k) = sqlBaseType k <> ref

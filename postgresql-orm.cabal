@@ -30,6 +30,7 @@ library
                , time
                , transformers
                , unix
+               , vector
   ghc-options: -Wall
   exposed-modules: Data.AsTypeOf
                  , Data.HasField
