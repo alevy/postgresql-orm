@@ -44,7 +44,7 @@ module Database.PostgreSQL.ORM.Relationships (
   -- * Join tables
   , JoinTableInfo(..), JoinTableQueries(..), Joinable(..)
   , findJoin, addJoin, removeJoin
-  , joinLookupFragment
+  , joinSelectFragment
   -- ** Join table construction functions
   , joinDefault, joinReverse, joinThroughModel, joinThroughModelInfo
   -- ** Join table default queries
@@ -197,7 +197,7 @@ defaultJoinTableQueries jt = JoinTableQueries {
 
 defaultjtLookupQuery :: (Model b) => JoinTableInfo a b -> Query
 defaultjtLookupQuery jt = Query $ S.concat [
-  joinLookupFragment jt
+  joinSelectFragment jt
   , " where ", quoteIdent (jtTable jt), ".", quoteIdent (jtColumnA jt)
   , " = ?"
   ]
@@ -346,8 +346,8 @@ removeJoin :: (Joinable a b) => Connection -> a -> b -> IO Int64
 removeJoin c a b = execute c (jtRemoveQuery $ modelsToJTQ a b)
                    (primaryKey a, primaryKey b)
 
-joinLookupFragment :: (Model b) => JoinTableInfo a b -> S.ByteString
-joinLookupFragment jt = S.concat [
+joinSelectFragment :: (Model b) => JoinTableInfo a b -> S.ByteString
+joinSelectFragment jt = S.concat [
   modelSelectFragment bq, " join ", quoteIdent (jtTable jt)
   , " on ", quoteIdent (jtTable jt), ".", quoteIdent (jtColumnB jt)
   , " = ", quoteIdent (modelTable bi), ".", quoteIdent (jtKeyB jt)
