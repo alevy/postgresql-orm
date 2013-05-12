@@ -19,6 +19,7 @@ executable pg_migrate
 library
   default-language: Haskell2010
   build-depends: base < 6
+               , blaze-builder
                , bytestring
                , directory
                , filepath
