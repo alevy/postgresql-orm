@@ -44,6 +44,7 @@ module Database.PostgreSQL.ORM.Relationships (
   -- * Join tables
   , JoinTableInfo(..), JoinTableQueries(..), Joinable(..)
   , findJoin, addJoin, removeJoin
+  , joinLookupFragment
   -- ** Join table construction functions
   , joinDefault, joinReverse, joinThroughModel, joinThroughModelInfo
   -- ** Join table default queries
@@ -173,8 +174,8 @@ data JoinTableInfo a b = JoinTableInfo {
 
 data JoinTableQueries a b = JoinTableQueries {
     jtLookupQuery :: !Query
-    -- ^ Query takes 2 parameters, the primary keys of @a@ and @b@
-    -- respectively.
+    -- ^ Query takes 1 parameters, the primary keys of the @a@ that
+    -- should be joined with @b@.
   , jtAddQuery :: !Query
     -- ^ Query takes 4 parameters, namely two copies of each primary
     -- keys (@a@, @b@, @a@, @b@).  The redundancy is necessary for
@@ -196,14 +197,10 @@ defaultJoinTableQueries jt = JoinTableQueries {
 
 defaultjtLookupQuery :: (Model b) => JoinTableInfo a b -> Query
 defaultjtLookupQuery jt = Query $ S.concat [
-  modelSelectFragment bq, " join ", quoteIdent (jtTable jt)
-  , " on ", quoteIdent (jtTable jt), ".", quoteIdent (jtColumnB jt)
-  , " = ", quoteIdent (modelTable bi), ".", quoteIdent (jtKeyB jt)
+  joinLookupFragment jt
   , " where ", quoteIdent (jtTable jt), ".", quoteIdent (jtColumnA jt)
   , " = ?"
   ]
-  where bq = modelIdentifiers `gAsTypeOf1` jt
-        bi = modelInfo `gAsTypeOf1` jt
 
 -- | Creates a query for adding a join relationsihp to the table.  If
 -- the first argument is 'True', then duplicates will be allowed in
@@ -349,3 +346,11 @@ removeJoin :: (Joinable a b) => Connection -> a -> b -> IO Int64
 removeJoin c a b = execute c (jtRemoveQuery $ modelsToJTQ a b)
                    (primaryKey a, primaryKey b)
 
+joinLookupFragment :: (Model b) => JoinTableInfo a b -> S.ByteString
+joinLookupFragment jt = S.concat [
+  modelSelectFragment bq, " join ", quoteIdent (jtTable jt)
+  , " on ", quoteIdent (jtTable jt), ".", quoteIdent (jtColumnB jt)
+  , " = ", quoteIdent (modelTable bi), ".", quoteIdent (jtKeyB jt)
+  ]
+  where bq = modelIdentifiers `gAsTypeOf1` jt
+        bi = modelInfo `gAsTypeOf1` jt
