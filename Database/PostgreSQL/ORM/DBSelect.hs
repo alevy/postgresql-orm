@@ -59,11 +59,13 @@ class GDBS f where
   gdbsParam :: f p -> Endo [Action]
 instance GDBS (K1 i Query) where
   gdbsDefault = K1 (Query S.empty)
-  gdbsQuery (K1 (Query bs)) = Endo (bs :)
-  gdbsParam (K1 (Query bs)) = Endo id
+  gdbsQuery (K1 (Query bs)) | S.null bs = mempty
+                            | otherwise = Endo (bs :)
+  gdbsParam _ = mempty
 instance GDBS (K1 i Clause) where
   gdbsDefault = K1 emptyClause
-  gdbsQuery (K1 cl) = Endo ((clQuery cl) :)
+  gdbsQuery (K1 cl) | S.null (clQuery cl) = mempty
+                    | otherwise           = Endo ((clQuery cl) :)
   gdbsParam (K1 cl) = Endo ((clParam cl) ++)
 instance (GDBS a, GDBS b) => GDBS (a :*: b) where
   gdbsDefault = gdbsDefault :*: gdbsDefault
@@ -74,12 +76,12 @@ instance (GDBS f) => GDBS (M1 i c f) where
   gdbsQuery = gdbsQuery . unM1
   gdbsParam = gdbsParam . unM1
 
-emptyDBSelect :: (DBSelect a)
+emptyDBSelect :: DBSelect a
 emptyDBSelect = (to gdbsDefault) { selSelect = fromString "SELECT" }
 
-renderDBSelect :: (DBSelect a) -> Query
-renderDBSelect dbs = Query $ S.intercalate " " $ filter (not . S.null) $
-                     appEndo (gdbsQuery $ from dbs) []
+renderDBSelect :: DBSelect a -> Query
+renderDBSelect dbs =
+  Query $ S.intercalate " " $ appEndo (gdbsQuery $ from dbs) []
 
 instance ToRow (DBSelect a) where
   toRow dbs = appEndo (gdbsParam $ from dbs) []
