@@ -24,10 +24,12 @@ module Database.PostgreSQL.ORM.Model (
     , defaultModelTable, defaultModelColumns, defaultModelGetPrimaryKey
     , defaultModelRead, defaultModelWrite
     , defaultModelIdentifiers
+    , defaultModelDBSelect
     , defaultModelQueries
     , defaultModelLookupQuery, defaultModelUpdateQuery
     , defaultModelInsertQuery, defaultModelDeleteQuery
       -- * Helper functions and miscellaneous internals
+    , dbSelectModel
     , quoteIdent, NormalRef(..), UniqueRef(..)
     , GPrimaryKey0(..), GColumns(..), GDatatypeName(..)
     , printq
@@ -55,6 +57,7 @@ import GHC.Generics
 
 import Data.AsTypeOf
 import Data.RequireSelector
+import Database.PostgreSQL.ORM.DBSelect
 
 -- | A type large enough to hold database primary keys.  Do not use
 -- this type directly in your data structures.  Use 'DBKey' to hold a
@@ -429,6 +432,11 @@ defaultModelIdentifiers mi = ModelIdentifiers {
         qcols = map qcol $ modelColumns mi
         pki = modelPrimaryColumn mi
 
+defaultModelDBSelect :: ModelIdentifiers a -> DBSelect (LookupRow a)
+defaultModelDBSelect mi = emptyDBSelect {
+    selFields = Query $ S.intercalate ", " $ modelQColumns mi
+  , selFrom = Clause ("FROM " <> modelQTable mi) []
+  }
 
 data ModelQueries a = ModelQueries {
     modelLookupQuery :: !Query
@@ -581,6 +589,9 @@ class Model a where
   modelIdentifiers :: ModelIdentifiers a
   {-# INLINE modelIdentifiers #-}
   modelIdentifiers = defaultModelIdentifiers modelInfo
+  modelDBSelect :: DBSelect (LookupRow a)
+  {-# INLINE modelDBSelect #-}
+  modelDBSelect = defaultModelDBSelect modelIdentifiers
   modelQueries :: ModelQueries a
   {-# INLINE modelQueries #-}
   modelQueries = defaultModelQueries modelIdentifiers
@@ -753,7 +764,7 @@ primaryKey a = modelGetPrimaryKey modelInfo a
 -- @modelSelectFragment@ followed by \"@WHERE@ /primary-key/ = ?\".
 modelSelectFragment :: ModelIdentifiers a -> S.ByteString
 modelSelectFragment mi = S.concat [
- "select ", S.intercalate ", " $ modelQColumns mi , " from ", modelQTable mi ]
+ "select ", S.intercalate ", " $ modelQColumns mi, " from ", modelQTable mi ]
 
 -- | A newtype wrapper in the 'FromRow' class, permitting every model
 -- to used as the result of a database query.
@@ -788,6 +799,9 @@ find :: (Model r) => Connection -> GDBRef rt r -> IO (Maybe r)
 {-# INLINE findRow #-}
 find = findRow
 
+dbSelectModel :: (Model a) => Connection -> DBSelect (LookupRow a) -> IO [a]
+dbSelectModel c dbs = map lookupRow <$> dbSelect c dbs
+
 -- | Find models matching a SQL @WHERE@ predicate given by a query and
 -- parameters.  For example, 'findAll' could have been defined as:
 --
@@ -796,30 +810,16 @@ find = findRow
 -- > findAll :: (Model r) => Connection -> IO [r]
 -- > findAll c = findWhere "TRUE" c ()
 findWhere :: (ToRow parms, Model r) => Query -> Connection -> parms -> IO [r]
-{-# INLINE findWhere #-}
-findWhere (Query whereClause) c parms = action
-  where sel = Query $ modelSelectFragment
-              (modelIdentifiers `gAsTypeOf1_1` action)
-              <> " where " <> whereClause
-        action = do rs <- query c sel parms
-                    return $ map lookupRow rs
+findWhere whereClause c parms =
+  dbSelectModel c $ addWhere modelDBSelect whereClause parms
 
 -- | A variant of 'findWhere' that does not require query parameters.
 findWhere_ :: (Model r) => Query -> Connection -> IO [r]
-{-# INLINE findWhere_ #-}
-findWhere_ (Query whereClause) c = action
-  where sel = Query $ modelSelectFragment
-              (modelIdentifiers `gAsTypeOf1_1` action)
-              <> " where " <> whereClause
-        action = do rs <- query_ c sel
-                    return $ map lookupRow rs
+findWhere_ whereClause c = findWhere whereClause c ()
 
 -- | Return an entire database table.
 findAll :: (Model r) => Connection -> IO [r]
-findAll c = action
-  where qs = modelIdentifiers `gAsTypeOf1_1` action
-        action = do rs <- query_ c (Query $ modelSelectFragment qs)
-                    return $ map lookupRow rs
+findAll c = dbSelectModel c modelDBSelect
 
 
 -- | Write a 'Model' to the database.  If the primary key is

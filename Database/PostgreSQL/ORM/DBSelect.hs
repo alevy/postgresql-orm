@@ -89,9 +89,6 @@ renderDBSelect dbs = Query $ toByteString $ gdbsQuery $ from dbs
 instance ToRow (DBSelect a) where
   toRow dbs = appEndo (gdbsParam $ from dbs) []
 
-dbSelect :: (FromRow a) => Connection -> DBSelect a -> IO [a]
-dbSelect c dbs = query c (renderDBSelect dbs) dbs
-
 setWhere :: (ToRow p) => DBSelect a -> Query -> p -> DBSelect a
 setWhere dbs q p = dbs { selWhere = mkClause q p }
 
@@ -101,10 +98,18 @@ addWhere dbs@DBSelect{ selWhere = wh } q@(Query q') p = dbs { selWhere = newwh }
               | otherwise     = appendClause " AND " wh $ mkClause q p
 
 setOrderBy :: DBSelect a -> Query -> DBSelect a
-setOrderBy dbs ob = dbs { selOrderBy = ob }
+setOrderBy dbs ob = dbs { selOrderBy = "ORDER BY " <> ob }
 
 setLimit :: DBSelect a -> Int -> DBSelect a
-setLimit dbs i = dbs { selLimit = mkClause "limit ?" (Only i) }
+setLimit dbs i = dbs { selLimit = mkClause "LIMIT ?" (Only i) }
 
 setOffset :: DBSelect a -> Int -> DBSelect a
-setOffset dbs i = dbs { selOffset = mkClause "limit ?" (Only i) }
+setOffset dbs i = dbs { selOffset = mkClause "OFFSET ?" (Only i) }
+
+newtype RenderedToRow = RenderedToRow [Action] deriving (Show)
+instance ToRow RenderedToRow where toRow (RenderedToRow as) = as
+
+dbSelect :: (FromRow a) => Connection -> DBSelect a -> IO [a]
+dbSelect c dbs =
+  case toRow dbs of [] -> query_ c (renderDBSelect dbs)
+                    as -> query c (renderDBSelect dbs) (RenderedToRow as)

@@ -10,17 +10,21 @@ import Data.Int
 import Data.Maybe
 
 import Control.Applicative
+import Database.PostgreSQL.Keywords
+import System.IO.Unsafe
 
 data Foo = Foo {
-  foo_key :: !DBKey
+    foo_key :: !DBKey
   , foo_name :: String
-  -- , parent :: !(Maybe (DBRef Bar))
+  , parent :: !(Maybe (DBRef Bar))
   } deriving (Show, Generic)
 
 instance Model Foo
+instance HasParent Foo Bar
+instance HasMany Bar Foo
 
 mkFoo :: String -> Foo
-mkFoo = Foo NullKey
+mkFoo name = Foo NullKey name Nothing
 
 data Bar = Bar {
     barId :: !DBKey
@@ -55,10 +59,15 @@ instance Joinable Foo Bar where
 instance Joinable Bar Foo where
   joinTable = joinReverse
 
+bar :: Bar
 bar = Bar NullKey (Just 44) "hi" Nothing
 
 mkc :: IO Connection
 mkc = connectPostgreSQL ""
+
+c :: Connection
+{-# NOINLINE c #-}
+c = unsafePerformIO mkc
 
 bar' :: Bar
 bar' = Bar NullKey (Just 75) "bye" Nothing
@@ -80,3 +89,10 @@ getOne k = bracket mkc close $ \c ->
   let r = fromJust <$> findRow c (DBRef k `gAsTypeOf1` r)
   in r
 
+
+junk = do
+  foos <- findAll c :: IO [Foo]
+  bars <- findAll c :: IO [Bar]
+  sequence $ zipWith (addJoin c) foos (drop 4 bars)
+  sequence $ zipWith (addJoin c) foos (drop 19 bars)
+  sequence $ zipWith (addJoin c) (drop 41 foos) bars
