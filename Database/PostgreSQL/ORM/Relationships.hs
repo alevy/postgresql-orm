@@ -61,7 +61,6 @@ import Data.List hiding (find)
 import Data.Maybe
 import Database.PostgreSQL.Simple
 import Database.PostgreSQL.Simple.Types
-import GHC.Generics
 
 import Data.AsTypeOf
 import Data.GetField
