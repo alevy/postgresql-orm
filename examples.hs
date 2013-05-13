@@ -12,6 +12,7 @@ import Data.Maybe
 import Control.Applicative
 import Database.PostgreSQL.Keywords
 import System.IO.Unsafe
+import Data.GetField
 
 data Foo = Foo {
     foo_key :: !DBKey
@@ -96,3 +97,19 @@ junk = do
   sequence $ zipWith (addJoin c) foos (drop 4 bars)
   sequence $ zipWith (addJoin c) foos (drop 19 bars)
   sequence $ zipWith (addJoin c) (drop 41 foos) bars
+
+data Quizog = Quizog {
+    qId :: !DBKey
+  , qNone :: !(Maybe Int32)
+  , qName :: !String
+  , qParent :: !(Maybe (DBRef Bar))
+  , qEd :: !(Only String)
+  } deriving (Show, Generic)
+
+quizog :: Quizog
+quizog = Quizog { qId = NullKey
+                , qNone = Just 3
+                , qName = "Mr. Quizog to you"
+                , qParent = Nothing
+                , qEd = Only "Q.E.D."
+                }

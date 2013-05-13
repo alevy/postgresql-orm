@@ -61,9 +61,10 @@ import Data.List hiding (find)
 import Data.Maybe
 import Database.PostgreSQL.Simple
 import Database.PostgreSQL.Simple.Types
+import GHC.Generics
 
 import Data.AsTypeOf
-import Data.HasField
+import Data.GetField
 import Database.PostgreSQL.ORM.Model
 
 data DBRefInfo reftype child parent = DBRefInfo {
@@ -80,15 +81,18 @@ newtype DBRefQuery reftype child parent = DBRefQuery {
   dbrefQuery :: Query
   } deriving (Show)
 
-defaultDBRefInfo :: (Model child, HasMaybeField child (GDBRef rt parent)) =>
-                    rt -> DBRefInfo rt child parent
+defaultDBRefInfo ::
+  (Model child, GetField ExtractMaybe child (Maybe (GDBRef rt parent))) =>
+  rt -> DBRefInfo rt child parent
 defaultDBRefInfo _ = ri
-  where c = (undefined :: DBRefInfo rt c p -> c) ri
-        rp = (undefined :: DBRefInfo rt c p -> GDBRef rt p) ri
+  where c = undef2 ri
+        extractor = (const ExtractMaybe ::
+                        DBRefInfo rt c p -> ExtractMaybe (Maybe (GDBRef rt p)))
+                    ri
         ri = DBRefInfo {
-            dbrefSelector = fromJust . getMaybeFieldVal
+            dbrefSelector = fromJust . getFieldVal extractor
           , dbrefColumn = modelColumns (modelInfo `gAsTypeOf` c) !!
-                          getMaybeFieldPos c rp
+                          getFieldPos extractor c
           }
 
 defaultChildQuery :: (Model child) =>
@@ -99,8 +103,10 @@ defaultChildQuery ri = DBRefQuery $ Query $ S.concat [
 
 class (Model parent, Model child) => HasMany parent child where
   hasManyInfo :: DBRefInfo NormalRef child parent
-  default hasManyInfo :: (HasMaybeField child (GDBRef NormalRef parent)) =>
-                         DBRefInfo NormalRef child parent
+  default hasManyInfo :: 
+    (Model child
+    , GetField ExtractMaybe child (Maybe (GDBRef NormalRef parent))) =>
+    DBRefInfo NormalRef child parent
   {-# INLINE hasManyInfo #-}
   hasManyInfo = defaultDBRefInfo NormalRef
   hasManyQuery :: DBRefQuery NormalRef child parent
@@ -109,8 +115,10 @@ class (Model parent, Model child) => HasMany parent child where
 
 class (Model parent, Model child) => HasOne parent child where
   hasOneInfo :: DBRefInfo UniqueRef child parent
-  default hasOneInfo :: (HasMaybeField child (GDBRef UniqueRef parent)) =>
-                         DBRefInfo UniqueRef child parent
+  default hasOneInfo ::
+    (Model child
+    , GetField ExtractMaybe child (Maybe (GDBRef UniqueRef parent))) =>
+    DBRefInfo UniqueRef child parent
   {-# INLINE hasOneInfo #-}
   hasOneInfo = defaultDBRefInfo UniqueRef
   hasOneQuery :: DBRefQuery UniqueRef child parent
@@ -299,30 +307,26 @@ joinReverse :: (Joinable a b) => JoinTableInfo b a
 joinReverse = flipJoinTableInfo joinTable
 
 joinThroughModelInfo :: (Model jt, Model a, Model b
-                , HasMaybeField jt (DBRef a)
-                , HasMaybeField jt (DBRef b)) =>
-                ModelInfo jt -> JoinTableInfo a b
+                        , GetField ExtractMaybe jt (Maybe (DBRef a))
+                        , GetField ExtractMaybe jt (Maybe (DBRef b))) =>
+                        ModelInfo jt -> JoinTableInfo a b
 joinThroughModelInfo jt = jti
-  where dummyRef :: ModelInfo a -> DBRef a
-        dummyRef _ = undefined
-        poptycon :: ModelInfo a -> a
-        poptycon _ = undefined
+  where extractor :: ModelInfo a -> ExtractMaybe (Maybe (DBRef a))
+        extractor _ = ExtractMaybe
         (a, b) = joinTableInfoModels jti
         jti = JoinTableInfo {
             jtTable = modelTable jt
           , jtAllowModification = False
-          , jtColumnA = modelColumns jt !!
-                        getMaybeFieldPos (poptycon jt) (dummyRef a)
+          , jtColumnA = modelColumns jt !! getFieldPos (extractor a) (undef1 jt)
           , jtKeyA = modelColumns a !! modelPrimaryColumn a
-          , jtColumnB = modelColumns jt !!
-                        getMaybeFieldPos (poptycon jt) (dummyRef b)
+          , jtColumnB = modelColumns jt !! getFieldPos (extractor b) (undef1 jt)
           , jtKeyB = modelColumns b !! modelPrimaryColumn b
           , jtDummy = DummyForRetainingTypes
           }
 
 joinThroughModel :: (Model jt, Model a, Model b
-                   , HasMaybeField jt (DBRef a)
-                   , HasMaybeField jt (DBRef b)) =>
+                    , GetField ExtractMaybe jt (Maybe (DBRef a))
+                    , GetField ExtractMaybe jt (Maybe (DBRef b))) =>
                    jt -> JoinTableInfo a b
 joinThroughModel = joinThroughModelInfo . gAsTypeOf modelInfo
 
