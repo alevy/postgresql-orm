@@ -10,6 +10,35 @@
 -- 'Generic' data structure, when the data structure contains exactly
 -- one field of the given type.  Only works for types with exactly one
 -- constructor (not variant types).
+--
+-- An example of usage:
+--
+-- > data MyType = MyType { myString :: String             -- position 0
+-- >                      , myInt :: Int                   -- position 1
+-- >                      , myBool :: Bool                 -- position 2
+-- >                      , myMaybeChar :: Maybe Char      -- position 3
+-- >                      , myMaybeString :: Maybe String  -- position 4
+-- >                      } deriving (Show, Generic)
+-- > 
+-- > myType :: MyType
+-- > myType = MyType "my type" 21 True Nothing (Just "maybe string")
+--
+-- >>> getFieldVal ExtractId myType :: String
+-- "my type"
+-- >>> getFieldVal ExtractId myType :: Int
+-- 21
+-- >>> getFieldVal ExtractMaybe myType :: Maybe Char
+-- Nothing
+-- >>> getFieldVal ExtractMaybe myType :: Maybe Int
+-- Just 21
+-- >>> getFieldVal ExtractMaybe myType :: Maybe String  -- ambiguous
+-- <interactive>:5:1: Couldn't match type `THasMany' with `THasOne'
+-- >>> getFieldPos' ExtractId (undefined :: MyType) (undefined :: Bool)
+-- 2
+-- >>> getFieldPos' ExtractMaybe (undefined :: MyType) (undefined :: Maybe Bool)
+-- 2
+-- >>> getFieldPos' ExtractMaybe myType ()  -- No field has type ()
+-- <interactive>:8:1: Couldn't match type `THasNone' with `THasOne'
 module Data.GetField (
   GetField(..), ExtractId(..), ExtractMaybe(..), getFieldPos'
   -- * Internals
@@ -193,7 +222,7 @@ instance Extractor ExtractId a a THasOne where
   extract _ = THasOne
 
 -- | An extractor that matches either type @r@ or type @Maybe r@, and,
--- in the former case, wraps @Just@ around the value so as to always
+-- in the former case, wraps @Just@ around the value so as always to
 -- return type @Maybe r@.
 data ExtractMaybe r = ExtractMaybe
 instance Extractor ExtractMaybe a (Maybe a) THasOne where
