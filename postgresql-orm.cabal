@@ -37,6 +37,7 @@ library
                  , Database.PostgreSQL.Devel
                  , Database.PostgreSQL.Describe
                  , Database.PostgreSQL.Migration
+                 , Database.PostgreSQL.ORM.Association
                  , Database.PostgreSQL.ORM.CreateTable
                  , Database.PostgreSQL.ORM.DSL
                  , Database.PostgreSQL.ORM.Model

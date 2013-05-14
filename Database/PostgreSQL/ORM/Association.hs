@@ -52,8 +52,10 @@ instance Show (Association a b) where
 data GDBRefInfo reftype child parent = DBRefInfo {
     dbrefSelector :: !(child -> GDBRef reftype parent)
     -- ^ Field selector returning a reference.
-  , dbrefColumn :: !S.ByteString
-    -- ^ Name of the database column storing the reference.
+  , dbrefQColumn :: !S.ByteString
+    -- ^ Double-quoted, table-qualified name of the database column
+    -- storing the reference.  (E.g.,
+    -- @dbrefQColumn = \"\\\"Table\\\".\\\"Column\\\"\"@)
   }
 
 type DBRefInfo = GDBRefInfo NormalRef
@@ -70,7 +72,7 @@ instance Extractor ExtractRef (Maybe (GDBRef rt a)) (DBRef (As alias a))
   extract _ (Just (DBRef k)) = THasOne $ DBRef k
 
 instance Show (GDBRefInfo rt c p) where
-  show ri = "DBRefInfo ? " ++ show (dbrefColumn ri)
+  show ri = "DBRefInfo ? " ++ show (dbrefQColumn ri)
 
 defaultDBRefInfo :: (Model child, Model parent
                     , GetField ExtractRef child (DBRef parent)) =>
@@ -81,8 +83,7 @@ defaultDBRefInfo = ri
         childids = modelIdentifiers `gAsTypeOf` child
         ri = DBRefInfo {
             dbrefSelector = getFieldVal extractor
-            -- XXX be consistent about whether *Info structs have quoted IDs
-          , dbrefColumn = modelQColumns childids !! getFieldPos extractor child
+          , dbrefQColumn = modelQColumns childids !! getFieldPos extractor child
           }
 
 dbrefAssocs :: (Model child, Model parent) => GDBRefInfo rt child parent
@@ -90,12 +91,12 @@ dbrefAssocs :: (Model child, Model parent) => GDBRefInfo rt child parent
 dbrefAssocs ri = (c_p, p_c)
   where idp = modelIdentifiers `gAsTypeOf1` c_p
         idc = modelIdentifiers `gAsTypeOf1` p_c
-        on = " ON " <> modelQPrimaryColumn idp <> " = " <> dbrefColumn ri
+        on = " ON " <> modelQPrimaryColumn idp <> " = " <> dbrefQColumn ri
         c_p = Association {
             assocSelect = fix $ \r -> (modelDBSelect `asTypeOf` r) {
                selJoins = [Query $ "JOIN " <> modelQTable idp <> on] }
           , assocQuery = Query $ modelSelectFragment idc <>
-                         " WHERE " <> dbrefColumn ri <> " = ?"
+                         " WHERE " <> dbrefQColumn ri <> " = ?"
           , assocParam = \p -> TrivParam [toField $ primaryKey p]
           }
         p_c = Association {
@@ -120,40 +121,33 @@ chainAssoc ab bc = Association {
   , assocQuery = assocQuery ab
   , assocParam = \(b :. _) -> assocParam ab b
   }
-                   
-data JoinTableInfo a b = JoinTableInfo {
-    jtTable :: !S.ByteString     -- ^ Name of the join table in the database
-  , jtAllowModification :: !Bool
-    -- ^ If 'False', disallow generic join table functions that modify
-    -- the database.  The default is 'True' for normal join tables,
-    -- but 'False' for 'joinThroughModel', since deleting a join
-    -- relationsip through a model will destroy other columns of the
-    -- join model.
-  , jtColumnA :: !S.ByteString   -- ^ Name of ref to A in join table
-  , jtKeyA :: !S.ByteString      -- ^ Name of referenced key field in table A
+
+data JoinTable a b = JoinTable {
+    jtTable :: !S.ByteString
+    -- ^ Name of the join table in the database.  (Not quoted.)
+  , jtColumnA :: !S.ByteString
+    -- ^ Name of the column in table 'jtTable' that contains a 'DBRef'
+    -- to model @a@.  (Not quoted or table-qualified.)
   , jtColumnB :: !S.ByteString
-  , jtKeyB :: !S.ByteString
+    -- ^ Like 'jtColumnA' for model @b@.
   } deriving (Show)
 
-joinTableInfoModels :: (Model a, Model b) =>
-                       JoinTableInfo a b -> (ModelInfo a, ModelInfo b)
-joinTableInfoModels _ = (modelInfo, modelInfo)
-
-joinDefault :: (Model a, Model b) => JoinTableInfo a b
-joinDefault = jti
-  where (a, b) = joinTableInfoModels jti
-        keya = modelColumns a !! modelPrimaryColumn a
-        keyb = modelColumns b !! modelPrimaryColumn b
-        jti = JoinTableInfo {
-            jtTable = S.intercalate "_" $
-                      sort [modelTable a, modelTable b]
-          , jtAllowModification = True
-          , jtColumnA = S.concat [modelTable a, "_", keya]
-          , jtKeyA = keya
-          , jtColumnB = S.concat [modelTable b, "_", keyb]
-          , jtKeyB = keyb
+defaultJoinTable :: (Model a, Model b) => JoinTable a b
+defaultJoinTable = jti
+  where a = modelInfo `gAsTypeOf2` jti
+        b = modelInfo `gAsTypeOf1` jti
+        jti = JoinTable {
+            jtTable = S.intercalate "_" $ sort [modelTable a, modelTable b]
+          , jtColumnA = S.intercalate "_"
+                        [modelTable a, modelColumns a !! modelPrimaryColumn a]
+          , jtColumnB = S.intercalate "_"
+                        [modelTable b, modelColumns b !! modelPrimaryColumn b]
           }
 
+
+-- joinTableAddStatement :: (Model a, Model b) => JoinTableInfo a b -> Query
+
+{-
 joinThroughModelInfo :: (Model jt, Model a, Model b
                         , GetField ExtractRef jt (DBRef a)
                         , GetField ExtractRef jt (DBRef b)) =>
@@ -177,7 +171,7 @@ joinThroughModel :: (Model jt, Model a, Model b
 joinThroughModel = joinThroughModelInfo . gAsTypeOf modelInfo
 
 
-
+-}
 
 
 data T1 = T1 deriving (Show, Generic)
