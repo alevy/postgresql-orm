@@ -48,6 +48,15 @@ instance Show (Association a b) where
   show assoc = "Association " ++ show (assocSelect assoc) ++ " " ++
                show (assocQuery assoc) ++ " ?"
 
+data GDBRefInfo reftype child parent = DBRefInfo {
+    dbrefSelector :: !(child -> GDBRef reftype parent)
+    -- ^ Field selector returning a reference.
+  , dbrefColumn :: !S.ByteString
+    -- ^ Name of the database column storing the reference.
+  }
+
+type DBRefInfo = GDBRefInfo NormalRef
+
 data ExtractRef a = ExtractRef deriving (Show)
 instance Extractor ExtractRef (GDBRef rt a) (DBRef a) THasOne where
   extract _ (DBRef k) = THasOne $ DBRef k
@@ -59,41 +68,47 @@ instance Extractor ExtractRef (Maybe (GDBRef rt a)) (DBRef (As alias a))
          THasOne where
   extract _ (Just (DBRef k)) = THasOne $ DBRef k
 
-refAssoc :: (Model child, Model parent
-           , GetField ExtractRef child (DBRef parent)) =>
-           (Association child parent, Association parent child)
-refAssoc = (c_p, p_c)
+instance Show (GDBRefInfo rt c p) where
+  show ri = "DBRefInfo ? " ++ show (dbrefColumn ri)
+
+defaultDBRefInfo :: (Model child, Model parent
+                    , GetField ExtractRef child (DBRef parent)) =>
+                    DBRefInfo child parent
+defaultDBRefInfo = ri
+  where extractor = (const ExtractRef :: g p -> ExtractRef (DBRef p)) ri
+        child = undef2 ri
+        childids = modelIdentifiers `gAsTypeOf` child
+        ri = DBRefInfo {
+            dbrefSelector = getFieldVal extractor
+          , dbrefColumn = modelQColumns childids !! getFieldPos extractor child
+          }
+
+dbrefAssocs :: (Model child, Model parent) => GDBRefInfo rt child parent
+               -> (Association child parent, Association parent child)
+dbrefAssocs ri = (c_p, p_c)
   where idp = modelIdentifiers `gAsTypeOf1` c_p
         idc = modelIdentifiers `gAsTypeOf1` p_c
-        extractor = (const ExtractRef :: g p -> ExtractRef (DBRef p)) c_p
-        ccol = modelQColumns idc !! getFieldPos extractor (undef1 p_c)
-        on = " ON " <> modelQPrimaryColumn idp <> " = " <> ccol
-        mkSel :: (Model a) => ModelIdentifiers a -> ModelIdentifiers b
-                 -> DBSelect (LookupRow a)
-        mkSel ids otherids = fix $ \r -> (modelDBSelect `asTypeOf` r) {
-            selFrom = Query $ modelQTable ids
-          , selJoins = [Query $ "JOIN " <> modelQTable otherids <> on]
-          }
+        on = " ON " <> modelQPrimaryColumn idp <> " = " <> dbrefColumn ri
         c_p = Association {
             assocSelect = fix $ \r -> (modelDBSelect `asTypeOf` r) {
                selJoins = [Query $ "JOIN " <> modelQTable idp <> on] }
           , assocQuery = Query $ modelSelectFragment idc <>
-                         " WHERE " <> ccol <> " = ?"
+                         " WHERE " <> dbrefColumn ri <> " = ?"
           , assocParam = \p -> TrivParam [toField $ primaryKey p]
           }
         p_c = Association {
             assocSelect = fix $ \r -> (modelDBSelect `asTypeOf` r) {
                selJoins = [Query $ "JOIN " <> modelQTable idc <> on] }
           , assocQuery = defaultModelLookupQuery idp
-          , assocParam = \c -> TrivParam [toField $ getFieldVal extractor c]
+          , assocParam = \c -> TrivParam [toField $ dbrefSelector ri c]
           }
 
 has :: (Model a, Model b, GetField ExtractRef b (DBRef a)) => Association a b
-has = snd refAssoc
+has = snd $ dbrefAssocs defaultDBRefInfo
 
 belongsTo :: (Model a, Model b, GetField ExtractRef b (DBRef a)) =>
              Association b a
-belongsTo = fst refAssoc
+belongsTo = fst $ dbrefAssocs defaultDBRefInfo
 
 
 chainAssoc :: Association a b -> Association b c -> Association a (b :. c)
@@ -104,6 +119,8 @@ chainAssoc ab bc = Association {
   , assocParam = \(b :. _) -> assocParam ab b
   }
                    
+
+
 
 
 data T1 = T1 deriving (Show, Generic)
@@ -130,7 +147,7 @@ refTest' = As refTest
 
 xx :: Association Quizog RefTest
 yy :: Association RefTest Quizog
-(yy,xx) = refAssoc
+(yy,xx) = dbrefAssocs defaultDBRefInfo
 
 zz :: Association Quizog RefTest
 zz = has
