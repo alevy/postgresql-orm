@@ -1,3 +1,4 @@
+{-# LANGUAGE DefaultSignatures #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FunctionalDependencies #-}
@@ -152,8 +153,12 @@ instance GCount THasNone where gCount _ = (1, [])
 -- to 'THasNone'.
 class Extractor f a r g | f a r -> g where
   extract :: f r -> a -> g r
+  extractCount :: f r -> a -> (Int, [Int])
+  default extractCount :: (GCount g) => f r -> a -> (Int, [Int])
+  extractCount fr a = gCount (extract fr a)
 instance (TypeGCast THasNone g) => Extractor f a r g where
   extract _ _ = typeGCast THasNone
+  extractCount _ _ = gCount THasNone
 
 -- | Generlized extraction of a field from a 'Generic' data structure.
 -- Argument @rep@ should generally be the type @'Rep' t@ for some data
@@ -170,10 +175,10 @@ class GGetField f rep r g | f rep r -> g where
   -- of fields (matching or not) in the structure and @positions@ is a
   -- list of zero-based field numbers of the fields matching target
   -- type @f r@.
-instance (Extractor f c r g, GCount g) => GGetField f (K1 i c) r g where
+instance (Extractor f c r g) => GGetField f (K1 i c) r g where
   {-# INLINE gGetFieldVal #-}
   gGetFieldVal f (K1 c) = extract f c
-  gGetFieldPos f k = gCount (gGetFieldVal f k)
+  gGetFieldPos f (K1 c) = extractCount f c
 instance (GGetField f a1 r g1, GGetField f a2 r g2, GCombine g1 g2 g) =>
          GGetField f (a1 :*: a2) r g where
            {-# INLINE gGetFieldVal #-}

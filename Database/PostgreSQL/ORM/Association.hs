@@ -51,7 +51,12 @@ instance Show (Association a b) where
 data ExtractRef a = ExtractRef deriving (Show)
 instance Extractor ExtractRef (GDBRef rt a) (DBRef a) THasOne where
   extract _ (DBRef k) = THasOne $ DBRef k
+instance Extractor ExtractRef (GDBRef rt a) (DBRef (As alias a)) THasOne where
+  extract _ (DBRef k) = THasOne $ DBRef k
 instance Extractor ExtractRef (Maybe (GDBRef rt a)) (DBRef a) THasOne where
+  extract _ (Just (DBRef k)) = THasOne $ DBRef k
+instance Extractor ExtractRef (Maybe (GDBRef rt a)) (DBRef (As alias a))
+         THasOne where
   extract _ (Just (DBRef k)) = THasOne $ DBRef k
 
 refAssoc :: (Model child, Model parent
@@ -62,22 +67,23 @@ refAssoc = (c_p, p_c)
         idc = modelIdentifiers `gAsTypeOf1` p_c
         extractor = (const ExtractRef :: g p -> ExtractRef (DBRef p)) c_p
         ccol = modelQColumns idc !! getFieldPos extractor (undef1 p_c)
-        mkSel :: (Model a) => ModelIdentifiers a -> DBSelect (LookupRow a)
-        mkSel ids = fix $ \r -> (modelDBSelect `asTypeOf` r) {
-            selFields = Query $ S.intercalate ",  " $ modelQColumns ids
-          , selFrom = Query $ "FROM " <> modelQTable idp
-          , selJoinOp = "JOIN"
-          , selJoinTo = Query $ modelQTable idc
-          , selOn = Query $ " ON " <> modelQPrimaryColumn idp <> " = " <> ccol
+        on = " ON " <> modelQPrimaryColumn idp <> " = " <> ccol
+        mkSel :: (Model a) => ModelIdentifiers a -> ModelIdentifiers b
+                 -> DBSelect (LookupRow a)
+        mkSel ids otherids = fix $ \r -> (modelDBSelect `asTypeOf` r) {
+            selFrom = Query $ modelQTable ids
+          , selJoins = [Query $ "JOIN " <> modelQTable otherids <> on]
           }
         c_p = Association {
-            assocSelect = mkSel idc
+            assocSelect = fix $ \r -> (modelDBSelect `asTypeOf` r) {
+               selJoins = [Query $ "JOIN " <> modelQTable idp <> on] }
           , assocQuery = Query $ modelSelectFragment idc <>
                          " WHERE " <> ccol <> " = ?"
           , assocParam = \p -> TrivParam [toField $ primaryKey p]
           }
         p_c = Association {
-            assocSelect = mkSel idp
+            assocSelect = fix $ \r -> (modelDBSelect `asTypeOf` r) {
+               selJoins = [Query $ "JOIN " <> modelQTable idc <> on] }
           , assocQuery = defaultModelLookupQuery idp
           , assocParam = \c -> TrivParam [toField $ getFieldVal extractor c]
           }
@@ -90,17 +96,18 @@ belongsTo :: (Model a, Model b, GetField ExtractRef b (DBRef a)) =>
 belongsTo = fst refAssoc
 
 
-{-
 chainAssoc :: Association a b -> Association b c -> Association a (b :. c)
 chainAssoc ab bc = Association {
-    assocSelect = (assocSelect ab) { selFrom = newFrom }
+    assocSelect = (assocSelect ab) {
+       selJoins = selJoins (assocSelect ab) ++ selJoins (assocSelect bc) }
   , assocQuery = assocQuery ab
   , assocParam = \(b :. _) -> assocParam ab b
   }
-  where newFrom =
--}
                    
 
+
+data T1 = T1 deriving (Show, Generic)
+instance RowAlias T1
 
 data Quizog = Quizog {
     qId :: !DBKey
@@ -116,7 +123,17 @@ data RefTest = RefTest { rtId :: DBKey
 instance Model RefTest
 
 refTest :: RefTest
-refTest = RefTest NullKey (Just (DBRef 0))
+refTest = RefTest NullKey (Just (DBRef 99))
+
+refTest' :: As T1 RefTest
+refTest' = As refTest
 
 xx :: Association Quizog RefTest
-xx = has
+yy :: Association RefTest Quizog
+(yy,xx) = refAssoc
+
+zz :: Association Quizog RefTest
+zz = has
+
+exr :: ExtractRef (DBRef Quizog)
+exr = ExtractRef

@@ -114,3 +114,13 @@ quizog = Quizog { qId = NullKey
                 , qParent = Nothing
                 , qEd = Only "Q.E.D."
                 }
+
+data MyType = MyType { myString :: String             -- position 0
+                     , myInt :: Int                   -- position 1
+                     , myBool :: Bool                 -- position 2
+                     , myMaybeChar :: Maybe Char      -- position 3
+                     , myMaybeString :: Maybe String  -- position 4
+                     } deriving (Show, Generic)
+
+myType :: MyType
+myType = MyType "my type" 21 True Nothing (Just "maybe string")
