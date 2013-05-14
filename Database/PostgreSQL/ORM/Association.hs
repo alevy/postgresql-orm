@@ -174,9 +174,9 @@ jtCreateStatement jt = Query $ S.concat [
 
 jtAddStatement :: JoinTable a b -> Query
 jtAddStatement jt = Query $ S.concat [
-    "WITH \" $Row\" AS (VALUES (?, ?)) INSERT INTO ", jtQTable jt, " ("
+    "INSERT INTO ", jtQTable jt, " ("
   , quoteIdent $ jtColumnA jt, ", ", quoteIdent $ jtColumnB jt
-  , ") SELECT * FROM \" $Row\" EXCEPT SELECT "
+  , ") VALUES (?, ?) EXCEPT SELECT "
   , jtQColumnA jt, ", ", jtQColumnB jt, " FROM ", quoteIdent $ jtTable jt
   ]
 
