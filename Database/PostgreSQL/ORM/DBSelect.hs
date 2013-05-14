@@ -74,10 +74,8 @@ instance GDBS (K1 i Query) where
   gdbsParam _ = mempty
 instance GDBS (K1 i [Query]) where
   gdbsDefault = K1 []
-  gdbsQuery (K1 []) = mempty
-  gdbsQuery (K1 (Query qh:qt)) = fromByteString qh <> go qt
-    where go [] = mempty
-          go (Query h:t) = fromChar ' ' <> fromByteString h <> go t
+  gdbsQuery (K1 qs) = mconcat $ map doq qs
+    where doq q = fromByteString (fromQuery q) <> fromChar ' '
   gdbsParam _ = mempty
 instance GDBS (K1 i Clause) where
   gdbsDefault = K1 emptyClause
