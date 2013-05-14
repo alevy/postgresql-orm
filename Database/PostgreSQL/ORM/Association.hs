@@ -147,6 +147,18 @@ defaultJoinTable = jti
                         [modelTable b, modelColumns b !! modelPrimaryColumn b]
           }
 
+jtQTable :: JoinTable a b -> S.ByteString
+jtQTable = quoteIdent . jtTable
+
+jtQColumnA :: JoinTable a b -> S.ByteString
+jtQColumnA jt = S.concat [ jtQTable jt, ".", quoteIdent $ jtColumnA jt]
+
+jtQColumnB :: JoinTable a b -> S.ByteString
+jtQColumnB jt = S.concat [ jtQTable jt, ".", quoteIdent $ jtColumnB jt]
+
+jtFlip :: JoinTable a b -> JoinTable b a
+jtFlip jt = jt { jtColumnA = jtColumnB jt , jtColumnB = jtColumnA jt }
+
 jtCreateStatement :: (Model a, Model b) => JoinTable a b -> Query
 jtCreateStatement jt = Query $ S.concat [
     "CREATE TABLE ", quoteIdent $ jtTable jt, " ("
@@ -162,26 +174,43 @@ jtCreateStatement jt = Query $ S.concat [
 
 jtAddStatement :: JoinTable a b -> Query
 jtAddStatement jt = Query $ S.concat [
-    "WITH \" $Row\" AS (VALUES (?, ?)) INSERT INTO "
-  , quoteIdent $ jtTable jt , " ("
+    "WITH \" $Row\" AS (VALUES (?, ?)) INSERT INTO ", jtQTable jt, " ("
   , quoteIdent $ jtColumnA jt, ", ", quoteIdent $ jtColumnB jt
   , ") SELECT * FROM \" $Row\" EXCEPT SELECT "
-  , quoteIdent $ jtColumnA jt, ", ", quoteIdent $ jtColumnB jt
-  , " FROM ", quoteIdent $ jtTable jt
+  , jtQColumnA jt, ", ", jtQColumnB jt, " FROM ", quoteIdent $ jtTable jt
   ]
 
 jtRemoveStatement :: JoinTable a b -> Query
 jtRemoveStatement jt = Query $ S.concat [
     "DELETE FROM ", quoteIdent $ jtTable jt, " WHERE "
-  , quoteIdent $ jtColumnA jt, " = ? AND "
-  , quoteIdent $ jtColumnB jt, " = ?"
+  , jtQColumnA jt, " = ? AND ", jtQColumnB jt, " = ?"
   ]
 
-{-
-with row as (values (3,4)) insert into foo_bar (foo_id, bar_id) select * from row except select foo_id, bar_id from foo_bar;
--}
+jtAssoc :: (Model a, Model b) => JoinTable a b -> (Association a b)
+jtAssoc jt = Association {
+    assocSelect = sel
+  , assocQuery = q
+  , assocParam = \b -> TrivParam [toField $ primaryKey b]
+  }
+  where ida = modelIdentifiers `gAsTypeOf2` jt
+        idb = modelIdentifiers `gAsTypeOf1` jt
+        joins = [Query $ "JOIN " <> jtQTable jt <>
+                 " ON " <> modelQPrimaryColumn ida <> " = " <> jtQColumnA jt
+                , Query $ "JOIN " <> modelQTable idb <>
+                  " ON " <> jtQColumnB jt <> " = " <> modelQPrimaryColumn idb]
+          
+        sel = sela { selJoins = selJoins sela ++ joins }
+          where sela = modelDBSelect `asTypeOf` sel
+        q = Query $ S.concat [
+            modelSelectFragment ida, " JOIN ", jtQTable jt
+            , " ON ", modelQPrimaryColumn ida, " = ", jtQColumnA jt
+            , " WHERE ", jtQColumnB jt, " = ?"
+          ]
 
--- joinTableAddStatement :: (Model a, Model b) => JoinTableInfo a b -> Query
+jtAssocs :: (Model a, Model b) =>
+            JoinTable a b -> (Association a b, Association b a)
+jtAssocs jt = (jtAssoc jt, jtAssoc $ jtFlip jt)
+
 
 {-
 joinThroughModelInfo :: (Model jt, Model a, Model b
