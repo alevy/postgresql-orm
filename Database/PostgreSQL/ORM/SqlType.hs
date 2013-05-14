@@ -81,12 +81,12 @@ instance (Model a) => SqlType (DBRef a) where
   sqlBaseType r@(DBRef k) = sqlBaseType k <> ref
     where t = modelInfo `gAsTypeOf1` r
           ref = S.concat [
-              " references ", quoteIdent (modelTable t) , "("
+              " REFERENCES ", quoteIdent (modelTable t) , "("
               , quoteIdent (modelColumns t !! modelPrimaryColumn t), ")" ]
 
 instance (Model a) => SqlType (DBRefUnique a) where
   sqlBaseType r@(DBRef k) = sqlBaseType k <> ref
     where t = modelInfo `gAsTypeOf1` r
           ref = S.concat [
-              " unique references ", quoteIdent (modelTable t) , "("
+              " UNIQUE REFERENCES ", quoteIdent (modelTable t) , "("
               , quoteIdent (modelColumns t !! modelPrimaryColumn t), ")" ]

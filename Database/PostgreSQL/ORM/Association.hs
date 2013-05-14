@@ -20,12 +20,15 @@ import Database.PostgreSQL.Simple.ToField
 import Database.PostgreSQL.Simple.ToRow
 import Database.PostgreSQL.Simple.Types
 
-import GHC.Generics
-
 import Data.AsTypeOf
 import Data.GetField
 import Database.PostgreSQL.ORM.DBSelect
 import Database.PostgreSQL.ORM.Model
+import Database.PostgreSQL.ORM.SqlType
+
+import GHC.Generics
+import Database.PostgreSQL.ORM.CreateTable
+import System.IO.Unsafe
 
 newtype TrivParam = TrivParam [Action] deriving (Show)
 instance ToRow TrivParam where
@@ -144,6 +147,39 @@ defaultJoinTable = jti
                         [modelTable b, modelColumns b !! modelPrimaryColumn b]
           }
 
+jtCreateStatement :: (Model a, Model b) => JoinTable a b -> Query
+jtCreateStatement jt = Query $ S.concat [
+    "CREATE TABLE ", quoteIdent $ jtTable jt, " ("
+    , S.intercalate ", " $ sort [typa, typb]
+    , ", UNIQUE (", S.intercalate ", " $ sort [ida, idb], "))"
+  ]
+  where ida = quoteIdent $ jtColumnA jt
+        idb = quoteIdent $ jtColumnB jt
+        refa = (undefined :: JoinTable a b -> DBRef a) jt
+        refb = (undefined :: JoinTable a b -> DBRef b) jt
+        typa = ida <> " " <> sqlBaseType refa <> " ON DELETE CASCADE NOT NULL"
+        typb = idb <> " " <> sqlBaseType refb <> " ON DELETE CASCADE NOT NULL"
+
+jtAddStatement :: JoinTable a b -> Query
+jtAddStatement jt = Query $ S.concat [
+    "WITH \" $Row\" AS (VALUES (?, ?)) INSERT INTO "
+  , quoteIdent $ jtTable jt , " ("
+  , quoteIdent $ jtColumnA jt, ", ", quoteIdent $ jtColumnB jt
+  , ") SELECT * FROM \" $Row\" EXCEPT SELECT "
+  , quoteIdent $ jtColumnA jt, ", ", quoteIdent $ jtColumnB jt
+  , " FROM ", quoteIdent $ jtTable jt
+  ]
+
+jtRemoveStatement :: JoinTable a b -> Query
+jtRemoveStatement jt = Query $ S.concat [
+    "DELETE FROM ", quoteIdent $ jtTable jt, " WHERE "
+  , quoteIdent $ jtColumnA jt, " = ? AND "
+  , quoteIdent $ jtColumnB jt, " = ?"
+  ]
+
+{-
+with row as (values (3,4)) insert into foo_bar (foo_id, bar_id) select * from row except select foo_id, bar_id from foo_bar;
+-}
 
 -- joinTableAddStatement :: (Model a, Model b) => JoinTableInfo a b -> Query
 
@@ -205,3 +241,13 @@ zz = has
 
 exr :: ExtractRef (DBRef Quizog)
 exr = ExtractRef
+
+myjt :: JoinTable Quizog RefTest
+myjt = defaultJoinTable
+
+mkc :: IO Connection
+mkc = connectPostgreSQL ""
+
+c :: Connection
+{-# NOINLINE c #-}
+c = unsafePerformIO mkc
