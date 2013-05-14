@@ -12,6 +12,7 @@ import qualified Data.ByteString as S
 import Data.Function
 import Data.Functor
 import Data.Int
+import Data.List
 import Data.Maybe
 import Data.Monoid
 import Database.PostgreSQL.Simple
@@ -80,6 +81,7 @@ defaultDBRefInfo = ri
         childids = modelIdentifiers `gAsTypeOf` child
         ri = DBRefInfo {
             dbrefSelector = getFieldVal extractor
+            -- XXX be consistent about whether *Info structs have quoted IDs
           , dbrefColumn = modelQColumns childids !! getFieldPos extractor child
           }
 
@@ -119,6 +121,61 @@ chainAssoc ab bc = Association {
   , assocParam = \(b :. _) -> assocParam ab b
   }
                    
+data JoinTableInfo a b = JoinTableInfo {
+    jtTable :: !S.ByteString     -- ^ Name of the join table in the database
+  , jtAllowModification :: !Bool
+    -- ^ If 'False', disallow generic join table functions that modify
+    -- the database.  The default is 'True' for normal join tables,
+    -- but 'False' for 'joinThroughModel', since deleting a join
+    -- relationsip through a model will destroy other columns of the
+    -- join model.
+  , jtColumnA :: !S.ByteString   -- ^ Name of ref to A in join table
+  , jtKeyA :: !S.ByteString      -- ^ Name of referenced key field in table A
+  , jtColumnB :: !S.ByteString
+  , jtKeyB :: !S.ByteString
+  } deriving (Show)
+
+joinTableInfoModels :: (Model a, Model b) =>
+                       JoinTableInfo a b -> (ModelInfo a, ModelInfo b)
+joinTableInfoModels _ = (modelInfo, modelInfo)
+
+joinDefault :: (Model a, Model b) => JoinTableInfo a b
+joinDefault = jti
+  where (a, b) = joinTableInfoModels jti
+        keya = modelColumns a !! modelPrimaryColumn a
+        keyb = modelColumns b !! modelPrimaryColumn b
+        jti = JoinTableInfo {
+            jtTable = S.intercalate "_" $
+                      sort [modelTable a, modelTable b]
+          , jtAllowModification = True
+          , jtColumnA = S.concat [modelTable a, "_", keya]
+          , jtKeyA = keya
+          , jtColumnB = S.concat [modelTable b, "_", keyb]
+          , jtKeyB = keyb
+          }
+
+joinThroughModelInfo :: (Model jt, Model a, Model b
+                        , GetField ExtractRef jt (DBRef a)
+                        , GetField ExtractRef jt (DBRef b)) =>
+                        ModelInfo jt -> JoinTableInfo a b
+joinThroughModelInfo jt = jti
+  where (a, b) = joinTableInfoModels jti
+        extractor = const ExtractRef :: ModelInfo a -> ExtractRef (DBRef a)
+        jti = JoinTableInfo {
+            jtTable = modelTable jt
+          , jtAllowModification = False
+          , jtColumnA = modelColumns jt !! getFieldPos (extractor a) (undef1 jt)
+          , jtKeyA = modelColumns a !! modelPrimaryColumn a
+          , jtColumnB = modelColumns jt !! getFieldPos (extractor b) (undef1 jt)
+          , jtKeyB = modelColumns b !! modelPrimaryColumn b
+          }
+
+joinThroughModel :: (Model jt, Model a, Model b
+                    , GetField ExtractRef jt (DBRef a)
+                    , GetField ExtractRef jt (DBRef b)) =>
+                   jt -> JoinTableInfo a b
+joinThroughModel = joinThroughModelInfo . gAsTypeOf modelInfo
+
 
 
 
