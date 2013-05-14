@@ -463,30 +463,28 @@ data ModelQueries a = ModelQueries {
 
 defaultModelLookupQuery :: ModelIdentifiers a -> Query
 defaultModelLookupQuery mi = Query $ S.concat [
-    "select ", S.intercalate ", " $ modelQColumns mi
-  , " from ", modelQTable mi
-  , " where ", modelQPrimaryColumn mi, " = ?"
+  modelSelectFragment mi, " WHERE ", modelQPrimaryColumn mi, " = ?"
   ]
 
 defaultModelUpdateQuery :: ModelIdentifiers a -> Query
 defaultModelUpdateQuery mi = Query $ S.concat [
-    "update ", modelQTable mi, " set "
+    "UPDATE ", modelQTable mi, " SET "
     , S.intercalate ", " $ map (<> " = ?") $ modelQWriteColumns mi
-    , " where ", modelQPrimaryColumn mi, " = ?"
+    , " WHERE ", modelQPrimaryColumn mi, " = ?"
   ]
 
 defaultModelInsertQuery :: ModelIdentifiers a -> Query
 defaultModelInsertQuery mi = Query $ S.concat $ [
-  "insert into ", modelQTable mi
+  "INSERT INTO ", modelQTable mi
   , " (", S.intercalate ", " $ modelQWriteColumns mi
-  , ") values (", S.intercalate ", " $ map (const "?") $ modelQWriteColumns mi
-  , ") returning ", S.intercalate ", " $ modelQColumns mi
+  , ") VALUES (", S.intercalate ", " $ map (const "?") $ modelQWriteColumns mi
+  , ") RETURNING ", S.intercalate ", " $ modelQColumns mi
   ]
 
 defaultModelDeleteQuery :: ModelIdentifiers a -> Query
 defaultModelDeleteQuery mi = Query $ S.concat [
-  "delete from ", modelQTable mi
-  , " where ", modelQPrimaryColumn mi, " = ?"
+  "DELETE FROM ", modelQTable mi
+  , " WHERE ", modelQPrimaryColumn mi, " = ?"
   ]
 
 -- | The default value of 'modelQueries'.
@@ -764,7 +762,7 @@ primaryKey a = modelGetPrimaryKey modelInfo a
 -- @modelSelectFragment@ followed by \"@WHERE@ /primary-key/ = ?\".
 modelSelectFragment :: ModelIdentifiers a -> S.ByteString
 modelSelectFragment mi = S.concat [
- "select ", S.intercalate ", " $ modelQColumns mi, " from ", modelQTable mi ]
+ "SELECT ", S.intercalate ", " $ modelQColumns mi, " FROM ", modelQTable mi ]
 
 -- | A newtype wrapper in the 'FromRow' class, permitting every model
 -- to used as the result of a database query.
