@@ -435,7 +435,7 @@ defaultModelIdentifiers mi = ModelIdentifiers {
 defaultModelDBSelect :: ModelIdentifiers a -> DBSelect (LookupRow a)
 defaultModelDBSelect mi = emptyDBSelect {
     selFields = Query $ S.intercalate ", " $ modelQColumns mi
-  , selFrom = Query $ "FROM " <> modelQTable mi
+  , selFrom = Query $ modelQTable mi
   }
 
 data ModelQueries a = ModelQueries {
@@ -603,6 +603,7 @@ class Model a where
 instance (Model a, Model b) => Model (a :. b) where
   modelInfo = joinModelInfo
   modelIdentifiers = joinModelIdentifiers
+  modelDBSelect = joinModelDBSelect modelDBSelect modelDBSelect
   modelQueries = error "attempt to perform standard query on join relation"
 
 joinModelInfo :: (Model a, Model b) => ModelInfo (a :. b)
@@ -626,7 +627,7 @@ joinModelInfo = r
 joinModelIdentifiers :: (Model a, Model b) => ModelIdentifiers (a :. b)
 joinModelIdentifiers = r
   where r = ModelIdentifiers {
-              modelQTable = modelQTable mia <> ", " <> modelQTable mib
+              modelQTable = modelQTable mia <> " CROSS JOIN " <> modelQTable mib
             , modelQColumns = modelQColumns mia ++ modelQColumns mib
             , modelQWriteColumns = error "attempt to write join relation"
             , modelQPrimaryColumn =
@@ -635,6 +636,16 @@ joinModelIdentifiers = r
         mia = modelIdentifiers `gAsTypeOf1_2` r
         mib = modelIdentifiers `gAsTypeOf1_1` r
 
+joinModelDBSelect :: (Model a, Model b) =>
+                     DBSelect (LookupRow a) -> DBSelect (LookupRow b)
+                     -> DBSelect (LookupRow (a :. b))
+joinModelDBSelect la lb = la {
+      selFields = Query $ fromQuery (selFields la) <> ", " <>
+                          fromQuery (selFields lb)
+    , selJoins = selJoins la ++
+                 (Query $ "CROSS JOIN " <> fromQuery (selFrom lb)) :
+                 selJoins lb
+  }
 
 class GUnitType f where
   gUnitTypeName :: f p -> String

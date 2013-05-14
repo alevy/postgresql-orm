@@ -13,6 +13,7 @@ import Control.Applicative
 import Database.PostgreSQL.Keywords
 import System.IO.Unsafe
 import Data.GetField
+import Database.PostgreSQL.ORM.DBSelect
 
 data Foo = Foo {
     foo_key :: !DBKey

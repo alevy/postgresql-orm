@@ -6,7 +6,7 @@
 module Database.PostgreSQL.ORM.DBSelect (
     Clause(..), emptyClause, mkClause, appendClause
   , DBSelect(..), emptyDBSelect, renderDBSelect
-  , setOn, addOn, setWhere, addWhere
+  , setWhere, addWhere
   , setOrderBy, setLimit, setOffset
   , dbSelect
   ) where
@@ -45,14 +45,15 @@ appendClause (Query delim) (Clause qa pa) (Clause qb pb) =
 data DBSelect a = DBSelect {
     selWith :: !Clause
   , selSelect :: !Query
-    -- ^ Normally \"SELECT\", but could also be, e.g., \"SELECT DISTINCT\"
+    -- ^ By default @\"SELECT\"@, but might usefully be set to
+    -- something else such as @\"SELECT DISTINCT\"@ in some
+    -- situations.
   , selFields :: !Query
+  , selFromKeyword :: !Query
+    -- ^ By default @\"FROM\"@, but could set it to empty for
+    -- selecting simple values (such as internal database functions).
   , selFrom :: !Query
-  , selJoinOp :: !Query
-    -- ^ Normally \"JOIN\", but could be \"NATURAL JOIN\", etc.
-  , selJoinTo :: !Query
-    -- ^ Right hand side of join operation
-  , selOn :: !Query
+  , selJoins :: ![Query]
   , selWhere :: !Clause
   , selGroupBy :: !Query
   , selHaving :: !Clause
@@ -71,6 +72,13 @@ instance GDBS (K1 i Query) where
   gdbsQuery (K1 (Query bs)) | S.null bs = mempty
                             | otherwise = fromByteString bs <> fromChar ' '
   gdbsParam _ = mempty
+instance GDBS (K1 i [Query]) where
+  gdbsDefault = K1 []
+  gdbsQuery (K1 []) = mempty
+  gdbsQuery (K1 (Query qh:qt)) = fromByteString qh <> go qt
+    where go [] = mempty
+          go (Query h:t) = fromChar ' ' <> fromByteString h <> go t
+  gdbsParam _ = mempty
 instance GDBS (K1 i Clause) where
   gdbsDefault = K1 emptyClause
   gdbsQuery (K1 cl) | S.null (clQuery cl) = mempty
@@ -86,21 +94,14 @@ instance (GDBS f) => GDBS (M1 i c f) where
   gdbsParam = gdbsParam . unM1
 
 emptyDBSelect :: DBSelect a
-emptyDBSelect = (to gdbsDefault) { selSelect = fromString "SELECT" }
+emptyDBSelect = (to gdbsDefault) { selSelect = fromString "SELECT"
+                                 , selFromKeyword = fromString "FROM" }
 
 renderDBSelect :: DBSelect a -> Query
 renderDBSelect dbs = Query $ toByteString $ gdbsQuery $ from dbs
 
 instance ToRow (DBSelect a) where
   toRow dbs = appEndo (gdbsParam $ from dbs) []
-
-setOn :: DBSelect a -> Query -> DBSelect a
-setOn dbs q = dbs { selOn = q }
-
-addOn :: DBSelect a -> Query -> DBSelect a
-addOn dbs@DBSelect{ selOn = (Query oldon) } (Query q) = dbs { selOn = newon }
-  where newon | S.null oldon = Query $ "ON " <> q
-              | otherwise    = Query $ oldon <> " AND " <> q
 
 setWhere :: (ToRow p) => DBSelect a -> Query -> p -> DBSelect a
 setWhere dbs q p = dbs { selWhere = mkClause q p }
