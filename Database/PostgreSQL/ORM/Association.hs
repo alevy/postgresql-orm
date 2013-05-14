@@ -1,12 +1,15 @@
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TypeOperators #-}
 
 {-# LANGUAGE DeriveGeneric #-}
 
 module Database.PostgreSQL.ORM.Association where
 
 import qualified Data.ByteString as S
+import Data.Function
 import Data.Functor
 import Data.Int
 import Data.Maybe
@@ -51,21 +54,21 @@ instance Extractor ExtractRef (GDBRef rt a) (DBRef a) THasOne where
 instance Extractor ExtractRef (Maybe (GDBRef rt a)) (DBRef a) THasOne where
   extract _ (Just (DBRef k)) = THasOne $ DBRef k
 
-refJoin :: (Model child, Model parent
+refAssoc :: (Model child, Model parent
            , GetField ExtractRef child (DBRef parent)) =>
            (Association child parent, Association parent child)
-refJoin = (c_p, p_c)
+refAssoc = (c_p, p_c)
   where idp = modelIdentifiers `gAsTypeOf1` c_p
         idc = modelIdentifiers `gAsTypeOf1` p_c
         extractor = (const ExtractRef :: g p -> ExtractRef (DBRef p)) c_p
         ccol = modelQColumns idc !! getFieldPos extractor (undef1 p_c)
-        mkSel :: ModelIdentifiers a -> DBSelect (LookupRow a)
-        mkSel ids = emptyDBSelect {
+        mkSel :: (Model a) => ModelIdentifiers a -> DBSelect (LookupRow a)
+        mkSel ids = fix $ \r -> (modelDBSelect `asTypeOf` r) {
             selFields = Query $ S.intercalate ",  " $ modelQColumns ids
-          , selFrom = Clause ("FROM " <> modelQTable idp <>
-                              " JOIN " <> modelQTable idc <>
-                              " ON " <> modelQPrimaryColumn idp <>
-                              " = " <> ccol) []
+          , selFrom = Query $ "FROM " <> modelQTable idp
+          , selJoinOp = "JOIN"
+          , selJoinTo = Query $ modelQTable idc
+          , selOn = Query $ " ON " <> modelQPrimaryColumn idp <> " = " <> ccol
           }
         c_p = Association {
             assocSelect = mkSel idc
@@ -80,11 +83,23 @@ refJoin = (c_p, p_c)
           }
 
 has :: (Model a, Model b, GetField ExtractRef b (DBRef a)) => Association a b
-has = snd refJoin
+has = snd refAssoc
 
 belongsTo :: (Model a, Model b, GetField ExtractRef b (DBRef a)) =>
              Association b a
-belongsTo = fst refJoin
+belongsTo = fst refAssoc
+
+
+{-
+chainAssoc :: Association a b -> Association b c -> Association a (b :. c)
+chainAssoc ab bc = Association {
+    assocSelect = (assocSelect ab) { selFrom = newFrom }
+  , assocQuery = assocQuery ab
+  , assocParam = \(b :. _) -> assocParam ab b
+  }
+  where newFrom =
+-}
+                   
 
 
 data Quizog = Quizog {

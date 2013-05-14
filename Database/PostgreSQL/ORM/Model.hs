@@ -435,7 +435,7 @@ defaultModelIdentifiers mi = ModelIdentifiers {
 defaultModelDBSelect :: ModelIdentifiers a -> DBSelect (LookupRow a)
 defaultModelDBSelect mi = emptyDBSelect {
     selFields = Query $ S.intercalate ", " $ modelQColumns mi
-  , selFrom = Clause ("FROM " <> modelQTable mi) []
+  , selFrom = Query $ "FROM " <> modelQTable mi
   }
 
 data ModelQueries a = ModelQueries {

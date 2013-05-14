@@ -6,7 +6,7 @@
 module Database.PostgreSQL.ORM.DBSelect (
     Clause(..), emptyClause, mkClause, appendClause
   , DBSelect(..), emptyDBSelect, renderDBSelect
-  , setWhere, addWhere
+  , setOn, addOn, setWhere, addWhere
   , setOrderBy, setLimit, setOffset
   , dbSelect
   ) where
@@ -47,7 +47,12 @@ data DBSelect a = DBSelect {
   , selSelect :: !Query
     -- ^ Normally \"SELECT\", but could also be, e.g., \"SELECT DISTINCT\"
   , selFields :: !Query
-  , selFrom :: !Clause
+  , selFrom :: !Query
+  , selJoinOp :: !Query
+    -- ^ Normally \"JOIN\", but could be \"NATURAL JOIN\", etc.
+  , selJoinTo :: !Query
+    -- ^ Right hand side of join operation
+  , selOn :: !Query
   , selWhere :: !Clause
   , selGroupBy :: !Query
   , selHaving :: !Clause
@@ -88,6 +93,14 @@ renderDBSelect dbs = Query $ toByteString $ gdbsQuery $ from dbs
 
 instance ToRow (DBSelect a) where
   toRow dbs = appEndo (gdbsParam $ from dbs) []
+
+setOn :: DBSelect a -> Query -> DBSelect a
+setOn dbs q = dbs { selOn = q }
+
+addOn :: DBSelect a -> Query -> DBSelect a
+addOn dbs@DBSelect{ selOn = (Query oldon) } (Query q) = dbs { selOn = newon }
+  where newon | S.null oldon = Query $ "ON " <> q
+              | otherwise    = Query $ oldon <> " AND " <> q
 
 setWhere :: (ToRow p) => DBSelect a -> Query -> p -> DBSelect a
 setWhere dbs q p = dbs { selWhere = mkClause q p }
