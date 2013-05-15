@@ -474,7 +474,11 @@ defaultModelUpdateQuery mi = Query $ S.concat [
   ]
 
 defaultModelInsertQuery :: ModelIdentifiers a -> Query
-defaultModelInsertQuery mi = Query $ S.concat $ [
+defaultModelInsertQuery mi
+  | null (modelQWriteColumns mi) = Query $ S.concat [
+    "INSERT INTO ", modelQTable mi, " DEFAULT VALUES RETURNING "
+    , S.intercalate ", " $ modelQColumns mi ]
+  | otherwise = Query $ S.concat $ [
   "INSERT INTO ", modelQTable mi
   , " (", S.intercalate ", " $ modelQWriteColumns mi
   , ") VALUES (", S.intercalate ", " $ map (const "?") $ modelQWriteColumns mi
