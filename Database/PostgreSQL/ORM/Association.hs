@@ -9,7 +9,6 @@
 module Database.PostgreSQL.ORM.Association where
 
 import qualified Data.ByteString as S
-import Data.Int
 import Data.List
 import Data.Monoid
 import Database.PostgreSQL.Simple
@@ -21,10 +20,6 @@ import Data.AsTypeOf
 import Data.GetField
 import Database.PostgreSQL.ORM.DBSelect
 import Database.PostgreSQL.ORM.Model
-import Database.PostgreSQL.ORM.SqlType
-
-import GHC.Generics
-import System.IO.Unsafe
 
 newtype TrivParam = TrivParam [Action] deriving (Show)
 instance ToRow TrivParam where
@@ -197,19 +192,6 @@ jtQColumnB jt = S.concat [ jtQTable jt, ".", quoteIdent $ jtColumnB jt]
 jtFlip :: JoinTable a b -> JoinTable b a
 jtFlip jt = jt { jtColumnA = jtColumnB jt , jtColumnB = jtColumnA jt }
 
-jtCreateStatement :: (Model a, Model b) => JoinTable a b -> Query
-jtCreateStatement jt = Query $ S.concat [
-    "CREATE TABLE ", quoteIdent $ jtTable jt, " ("
-    , S.intercalate ", " $ sort [typa, typb]
-    , ", UNIQUE (", S.intercalate ", " $ sort [ida, idb], "))"
-  ]
-  where ida = quoteIdent $ jtColumnA jt
-        idb = quoteIdent $ jtColumnB jt
-        refa = (undefined :: JoinTable a b -> DBRef a) jt
-        refb = (undefined :: JoinTable a b -> DBRef b) jt
-        typa = ida <> " " <> sqlBaseType refa <> " ON DELETE CASCADE NOT NULL"
-        typb = idb <> " " <> sqlBaseType refb <> " ON DELETE CASCADE NOT NULL"
-
 jtAddStatement :: JoinTable a b -> Query
 jtAddStatement jt = Query $ S.concat [
     "INSERT INTO ", jtQTable jt, " ("
@@ -249,7 +231,7 @@ jtAssocs :: (Model a, Model b) =>
 jtAssocs jt = (jtAssoc jt, jtAssoc $ jtFlip jt)
 
 
-
+{-
 data T1 = T1 deriving (Show, Generic)
 instance RowAlias T1
 
@@ -340,6 +322,8 @@ mkc = connectPostgreSQL ""
 c :: Connection
 {-# NOINLINE c #-}
 c = unsafePerformIO mkc
+
+-}
 
 dumpAssoc :: Association a b -> IO ()
 dumpAssoc a = do
