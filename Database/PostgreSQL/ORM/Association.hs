@@ -262,8 +262,10 @@ dbrefAssocs ri = (c_p, p_c)
 --
 -- > snd $ dbrefAssocs defaultDBRefInfo
 --
--- For example, given the @Author@ and @Post@ models described in the
--- documentation for 'GDBRefInfo', you might say:
+-- Note the inverse 'Association' is given by 'belongsTo'.  For
+-- example, given the @Author@ and @Post@ models described in the
+-- documentation for 'GDBRefInfo', in which each @Post@ references an
+-- @Author@, you might say:
 --
 -- > author_post :: Association Author Post
 -- > author_post = has
@@ -274,7 +276,7 @@ has :: (Model child, Model parent, GetField ExtractRef child (DBRef parent)) =>
        Association parent child
 has = snd $ dbrefAssocs defaultDBRefInfo
 
--- | Short for
+-- | The inverse of 'has'.  Short for
 --
 -- > fst $ dbrefAssocs defaultDBRefInfo
 --
