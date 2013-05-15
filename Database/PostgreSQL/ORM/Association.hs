@@ -124,41 +124,46 @@ belongsTo :: (Model child, Model parent
              Association child parent
 belongsTo = fst $ dbrefAssocs defaultDBRefInfo
 
-chainAssoc :: (Model a, Model c) =>
-              Association a b -> Association b c -> Association a c
-chainAssoc ab bc = bc {
-    assocSelect = sel
-  , assocQuery = renderDBSelect $ addWhere sel
-                 (Query $ modelQPrimaryColumn idc <> " = ?") () 
-  , assocParam = \c -> TrivParam [toField $ primaryKey c]
+splitLast :: [a] -> Maybe ([a], a)
+splitLast [] = Nothing
+splitLast s = Just $ go s
+  where go [a] = ([], a)
+        go (a:as) = case go as of (as', a') -> (a:as', a')
+
+nestAssoc :: Association a b -> Association b c -> Association (a :. b) c
+nestAssoc ab bc = Association {
+    assocSelect = (assocSelect bc) {
+       selJoins = selJoins (assocSelect bc) ++ selJoins (assocSelect ab) }
+  , assocQuery = assocQuery bc
+  , assocParam = \(_ :. b) -> assocParam bc b
   }
-  where idc = modelIdentifiers `gAsTypeOf1` bc
+
+chainAssoc :: (Model a, Model b, Model c) =>
+              Association a b -> Association b c -> Association a c
+chainAssoc ab bc =
+  case splitLast $ selJoins $ assocSelect bc of
+    Just (js, Join kw b on) | b == modelQTable idb -> bc {
+        assocSelect = sel
+      , assocQuery = renderDBSelect $ (assocSelect bc) {
+          selJoins = js ++ [Join kw subquery on]
+        }
+      , assocParam = assocParam ab
+      }
+    _ -> bc { assocSelect = sel
+            , assocQuery = renderDBSelect $ addWhere sel
+                           (Query $ modelQPrimaryColumn idc <> " = ?") () 
+            , assocParam = \c -> TrivParam [toField $ primaryKey c]
+            }
+  where idb = modelIdentifiers `gAsTypeOf1` ab
+        idc = modelIdentifiers `gAsTypeOf1` bc
+        subquery = S.concat ["(", fromQuery $ assocQuery ab
+                            , ") AS ", modelQTable idb]
         sel = (assocSelect bc) {
             selJoins = selJoins (assocSelect bc) ++ selJoins (assocSelect ab)
           }
 
 
-
 {-
-
-
-nestAssoc :: Association a b -> Association b c -> Association a (b :. c)
-nestAssoc ab bc = Association {
-    assocSelect = (assocSelect ab) {
-       selJoins = selJoins (assocSelect ab) ++ selJoins (assocSelect bc) }
-  , assocQuery = assocQuery ab
-  , assocParam = \(b :. _) -> assocParam ab b
-  }
-
-chainAssoc :: (Model c) => Association a b -> Association b c -> Association a c
-chainAssoc ab bc = abc {
-    assocQuery = renderDBSelect $ addWhere (assocSelect abc)
-                 (Query $ modelQPrimaryColumn idc <> " = ?") () 
-  , assocParam = \c -> TrivParam [toField $ primaryKey c]
-  }
-  where idc = modelIdentifiers `gAsTypeOf1` bc
-        abc = nestAssoc ab bc
-
 
 data JoinTable a b = JoinTable {
     jtTable :: !S.ByteString
@@ -277,7 +282,6 @@ author_posts = belongsTo
 post_comments :: Association Comment Post
 post_comments = belongsTo
 
-{-
 author_comments :: Association Comment Author
 author_comments =  chainAssoc post_comments author_posts
 
@@ -315,6 +319,7 @@ zz = belongsTo
 exr :: ExtractRef (DBRef Quizog)
 exr = ExtractRef
 
+{-
 myjt :: JoinTable Quizog RefTest
 myjt = defaultJoinTable
 -}
