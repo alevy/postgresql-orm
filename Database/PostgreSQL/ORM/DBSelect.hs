@@ -46,8 +46,12 @@ appendClause delim (Clause qa pa) (Clause qb pb) =
 
 data Join = Join {
     joinKeyword :: !S.ByteString
-  , joinTable :: !S.ByteString
+    -- ^ @\"JOIN\"@, @\"CROSS JOIN\"@, etc.
+  , joinRHS :: !S.ByteString
+    -- ^ Right-hand side of the join relation (i.e., @table2@ in
+    -- \"@SELECT table1 JOIN table2 ON ...@\")
   , joinOn :: !S.ByteString
+    -- ^ @\"ON ...\"@ or @\"USING ...\"@ clause.
   } deriving (Show)
 
 data DBSelect a = DBSelect {

@@ -1,18 +1,30 @@
 {-# LANGUAGE TypeOperators, MultiParamTypeClasses, DeriveGeneric, OverloadedStrings #-}
+
 import Control.Exception
+import Data.AsTypeOf
+import Data.Int
+import Data.Maybe
+import Database.PostgreSQL.ORM.Association
 import Database.PostgreSQL.ORM.CreateTable
 import Database.PostgreSQL.ORM.Model
 import Database.PostgreSQL.Simple
 import GHC.Generics
-import Data.AsTypeOf
-import Data.Int
-import Data.Maybe
 
 import Control.Applicative
 import Database.PostgreSQL.Keywords
 import System.IO.Unsafe
 import Data.GetField
 import Database.PostgreSQL.ORM.DBSelect
+
+data MyType = MyType { myString :: String             -- position 0
+                     , myInt :: Int                   -- position 1
+                     , myBool :: Bool                 -- position 2
+                     , myMaybeChar :: Maybe Char      -- position 3
+                     , myMaybeString :: Maybe String  -- position 4
+                     } deriving (Show, Generic)
+
+myType :: MyType
+myType = MyType "my type" 21 True Nothing (Just "maybe string")
 
 data Foo = Foo {
     foo_key :: !DBKey
@@ -79,6 +91,42 @@ getOne k = bracket mkc close $ \c ->
   let r = fromJust <$> findRow c (DBRef k `gAsTypeOf1` r)
   in r
 
+data T1 = T1 deriving (Show, Generic)
+instance RowAlias T1
+
+data Author = Author {
+    authorId :: DBKey
+  } deriving (Show, Generic)
+instance Model Author where modelInfo = underscoreModelInfo "author"
+
+data Post = Post {
+    postId :: DBKey
+  , postAuthorId :: DBRef Author
+  } deriving (Show, Generic)
+instance Model Post where modelInfo = underscoreModelInfo "post"
+
+data Comment = Comment {
+    commentId :: DBKey
+  , commentPostId :: DBRef Post
+  } deriving (Show, Generic)
+instance Model Comment where modelInfo = underscoreModelInfo "comment"
+
+
+author_posts :: Association Author Post
+post_author :: Association Post Author
+(post_author, author_posts) = dbrefAssocs defaultDBRefInfo
+
+
+post_comments :: Association Post Comment
+post_comments = has
+comment_post :: Association Comment Post
+comment_post = belongsTo
+
+comment_author :: Association Comment Author
+comment_author = chainAssoc comment_post post_author
+
+author_comments :: Association Author Comment
+author_comments =  chainAssoc author_posts post_comments
 
 {-
 junk = do
@@ -94,23 +142,15 @@ data Quizog = Quizog {
   , qNone :: !(Maybe Int32)
   , qName :: !String
   , qParent :: !(Maybe (DBRef Bar))
-  , qEd :: !(Only String)
+  , qEd :: !String
   } deriving (Show, Generic)
+instance Model Quizog
 
 quizog :: Quizog
 quizog = Quizog { qId = NullKey
                 , qNone = Just 3
                 , qName = "Mr. Quizog to you"
                 , qParent = Nothing
-                , qEd = Only "Q.E.D."
+                , qEd = "Q.E.D."
                 }
 
-data MyType = MyType { myString :: String             -- position 0
-                     , myInt :: Int                   -- position 1
-                     , myBool :: Bool                 -- position 2
-                     , myMaybeChar :: Maybe Char      -- position 3
-                     , myMaybeString :: Maybe String  -- position 4
-                     } deriving (Show, Generic)
-
-myType :: MyType
-myType = MyType "my type" 21 True Nothing (Just "maybe string")

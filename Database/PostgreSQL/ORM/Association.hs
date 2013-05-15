@@ -4,11 +4,25 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeOperators #-}
 
-{-# LANGUAGE DeriveGeneric #-}
-
-module Database.PostgreSQL.ORM.Association where
+module Database.PostgreSQL.ORM.Association (
+    Association
+  , findAssociated, findWhereAssociated
+    -- * Associations based on parent-child relationships
+  , GDBRefInfo(..), DBRefInfo, defaultDBRefInfo, dbrefAssocs, has, belongsTo
+    -- * Join table Associations
+  , JoinTable(..), defaultJoinTable
+  , jtAddStatement, jtRemoveStatement, jtParam, jtAssocs
+  , joinTable
+    -- * Nested and chained associations
+  , nestAssoc, chainAssoc
+    -- * Miscellaneous and internal details
+  , TrivParam(..)
+  , jtFlip, jtAssoc
+  , dumpAssoc
+  ) where
 
 import qualified Data.ByteString as S
+import Data.Functor
 import Data.List
 import Data.Monoid
 import Database.PostgreSQL.Simple
@@ -21,7 +35,16 @@ import Data.GetField
 import Database.PostgreSQL.ORM.DBSelect
 import Database.PostgreSQL.ORM.Model
 
--- | A trivial 'ToRow' instance that can be passed to 'query'.
+-- | A trivial 'ToRow' instance that can be passed to 'query'.  This
+-- structure is useful when you want to build up parameters piecemeal
+-- or stick them in a data structure.  To ensure a uniform type
+-- regardless of the original types of the parameters, they can be
+-- pre-marshalled in a monomorphic list of 'Action's.  @TrivParam@ is
+-- a newtype wrapper around such a list, because a newtype is required
+-- to declare a new instance of 'ToRow'.  (An alternative would be to
+-- declare an @instance 'ToRow' ['Action']@ or @instance ('ToField' a)
+-- => 'ToRow' [a]@, but that raises the risk of conflicting with other
+-- packages doing the same.)
 newtype TrivParam = TrivParam [Action] deriving (Show)
 instance ToRow TrivParam where
   toRow (TrivParam actions) = actions
@@ -62,9 +85,19 @@ data Association a b = Association {
     -- ^ The query parameters for the query returned by 'assocQuery'.
   }
 
-instance Show (Association b a) where
+instance Show (Association a b) where
   show assoc = "Association " ++ show (assocSelect assoc) ++ " " ++
                show (assocQuery assoc) ++ " ?"
+
+findAssociated :: (Model b) =>
+                  Association a b -> Connection -> a -> IO [b]
+findAssociated assoc c a =
+  map lookupRow <$> query c (assocQuery assoc) (assocParam assoc a)
+
+findWhereAssociated :: (Model b, ToRow p) =>
+                       Association a b -> Query -> Connection -> p -> IO [b]
+findWhereAssociated assoc wh c p = map lookupRow <$> query c q p
+  where q = renderDBSelect $ addWhere (assocSelect assoc) wh ()
 
 data GDBRefInfo reftype child parent = DBRefInfo {
     dbrefSelector :: !(child -> GDBRef reftype parent)
@@ -229,6 +262,9 @@ jtRemoveStatement jt = Query $ S.concat [
   , jtQColumnA jt, " = ? AND ", jtQColumnB jt, " = ?"
   ]
 
+jtParam :: (Model a, Model b) => JoinTable a b -> a -> b -> TrivParam
+jtParam _ a b = TrivParam [toField (primaryKey a), toField (primaryKey b)]
+
 jtAssoc :: (Model a, Model b) => JoinTable a b -> (Association a b)
 jtAssoc jt = Association {
     assocSelect = sel
@@ -253,46 +289,10 @@ jtAssocs :: (Model a, Model b) =>
             JoinTable a b -> (Association a b, Association b a)
 jtAssocs jt = (jtAssoc jt, jtAssoc $ jtFlip jt)
 
+joinTable :: (Model a, Model b) => Association a b
+joinTable = jtAssoc defaultJoinTable
 
 {-
-data T1 = T1 deriving (Show, Generic)
-instance RowAlias T1
-
-data Author = Author {
-    authorId :: DBKey
-  } deriving (Show, Generic)
-instance Model Author where modelInfo = underscoreModelInfo "author"
-
-data Post = Post {
-    postId :: DBKey
-  , postAuthorId :: DBRef Author
-  } deriving (Show, Generic)
-instance Model Post where modelInfo = underscoreModelInfo "post"
-
-data Comment = Comment {
-    commentId :: DBKey
-  , commentPostId :: DBRef Post
-  } deriving (Show, Generic)
-instance Model Comment where modelInfo = underscoreModelInfo "comment"
-
-
-author_posts :: Association Author Post
-post_author :: Association Post Author
-(post_author, author_posts) = dbrefAssocs defaultDBRefInfo
-
-
-post_comments :: Association Post Comment
-post_comments = has
-comment_post :: Association Comment Post
-comment_post = belongsTo
-
-comment_author :: Association Comment Author
-comment_author = chainAssoc comment_post post_author
-
-author_comments :: Association Author Comment
-author_comments =  chainAssoc author_posts post_comments
-
-
 
 data Quizog = Quizog {
     qId :: !DBKey
