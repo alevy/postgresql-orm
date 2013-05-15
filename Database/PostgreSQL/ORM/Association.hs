@@ -6,7 +6,7 @@
 
 module Database.PostgreSQL.ORM.Association (
     Association
-  , findAssociated, findWhereAssociated
+  , findAssociated, findAssociatedWhere
     -- * Associations based on parent-child relationships
   , GDBRefInfo(..), DBRefInfo, defaultDBRefInfo, dbrefAssocs, has, belongsTo
     -- * Join table Associations
@@ -58,15 +58,24 @@ instance ToRow TrivParam where
 --  * You already have an instance of type @a@, and want to find all
 --    the @b@s associated with it.  For that you use fields
 --    'assocQuery' and 'assocParam'.  If @a :: A@ and @assoc ::
---    Association A B@, to get a list of @B@s you would say:
+--    Association A B@, to get a list of @B@s you can do the following
+--    (though 'findAssociated' already does it):
 --
--- >   bs <- map lookupRow <$> query conn (assocQuery assoc) (assocParam assoc a)
+-- @
+--   bs <- 'map' 'lookupRow' &#x3C;$&#x3E; 'query' conn (assocQuery assoc) (assocParam assoc a)
+-- @
 --
 --  * You want to look up a bunch of @b@s, but filter using predicates
 --    on the associated @a@s (e.g., get a list of users who have
 --    commented on posts by a particular user).  For this purpose, you
 --    can use 'assocSelect', which allows you to 'addWhere' predicates
 --    mentioning columns in both @a@ and @b@.
+--
+-- 'assocQuery' and 'assocParam' are strictly less general than
+-- 'assocQuery'.  However, in common situations the former may be
+-- implemented more efficiently (because it knows how to extract
+-- fields other than the primary key from @a@, and hence may be able
+-- to avoid touching @a@'s index in the database).
 --
 -- Note that an association is asymmetric.  It tells you how to get
 -- @b@s from @a@s, but not vice versa.  In practice, there will almost
@@ -89,28 +98,97 @@ instance Show (Association a b) where
   show assoc = "Association " ++ show (assocSelect assoc) ++ " " ++
                show (assocQuery assoc) ++ " ?"
 
+-- | Follow an association to return all all of the @b@s associated
+-- with a particular @a@.
 findAssociated :: (Model b) =>
                   Association a b -> Connection -> a -> IO [b]
 findAssociated assoc c a =
   map lookupRow <$> query c (assocQuery assoc) (assocParam assoc a)
 
-findWhereAssociated :: (Model b, ToRow p) =>
+-- | Find all of the @b@s matching a @WHERE@ predicate.  Unlike
+-- 'findWhere', the predicate can mention fields of an associated
+-- model @a@.  Moreover, if a compound association is used, such as
+-- one created with 'chainAssoc' or 'nestAssoc', you can mention
+-- fields in intermediary tables as well.
+findAssociatedWhere :: (Model b, ToRow p) =>
                        Association a b -> Query -> Connection -> p -> IO [b]
-findWhereAssociated assoc wh c p = map lookupRow <$> query c q p
+findAssociatedWhere assoc wh c p = map lookupRow <$> query c q p
   where q = renderDBSelect $ addWhere (assocSelect assoc) wh ()
 
+
+-- | A common type of association is when one model contains a 'DBRef'
+-- or 'DBRefUnique' pointing to another model.  In this case, the
+-- model containing the 'DBRef' is called the /child/.  Conversely,
+-- the referenced model (whose primary key is stored in the 'DBRef'
+-- field of the child) is known as the /parent/.
+--
+-- Two pieces of information are required to describe a parent-child
+-- relationship:  The field selector that extracts the Haskell 'DBRef'
+-- from the haskell type @child@, and the name of the database column
+-- that stores this 'DBRef' field.
+--
+-- For example, consider the following:
+--
+-- > data Author = Author {
+-- >     authorId :: DBKey
+-- >   } deriving (Show, Generic)
+-- > instance Model Author
+-- > 
+-- > data Post = Post {
+-- >     postId :: DBKey
+-- >   , postAuthorId :: DBRef Author
+-- >   } deriving (Show, Generic)
+-- > instance Model Post
+-- >
+-- > post_author_refinfo :: DBRefInfo Post Author
+-- > post_author_refinfo = DBRefInfo {
+-- >     dbrefSelector = postAuthorId
+-- >   , dbrefQColumn = "\"post\".\"postAuthorId\""
+-- >   }
+--
+-- Note that the parent-child relationship described by a @GDBRefInfo@
+-- is asymmetric, but bidirectional.  When a @'DBRefInfo' child
+-- parent@ exists, the schema should generally /not/ permit the
+-- existence of a valid @'DBRefInfo' parent child@ structure.
+-- However, the 'dbrefAssocs' function generates 'Association's in
+-- both directions from a single 'DBRefInfo'.
+--
+-- Constructing such parent-child 'Association's requires knowing how
+-- to extract primary keys from the @parent@ type as well as the name
+-- of the column storing primary keys in @parent@.  Fortunately, this
+-- information is already available from the 'Model' class, and thus
+-- does not need to be in the @GDBRefInfo@.  (Most functions on
+-- @GDBRefInfo@s require @parent@ and @child@ to be instances of
+-- 'Model'.)
+--
+-- When your 'Model's are instances of 'Generic' (which will usually
+-- be the case), a 'DBRefInfo' structure can be computed automatically
+-- by 'defaultDBRefInfo'.  This is the recommended way to produce a
+-- @GDBRefInfo@.  (Alternatively, see 'has' and 'belongsTo' to make
+-- use of a @GDBRefInfo@ entirely implicit.)
 data GDBRefInfo reftype child parent = DBRefInfo {
     dbrefSelector :: !(child -> GDBRef reftype parent)
     -- ^ Field selector returning a reference.
   , dbrefQColumn :: !S.ByteString
-    -- ^ Double-quoted, table-qualified name of the database column
-    -- storing the reference.  (E.g.,
-    -- @dbrefQColumn = \"\\\"Table\\\".\\\"Column\\\"\"@)
+    -- ^ Literal SQL for the database column storing the reference.
+    -- This should be double-quoted and table-qualified, in case the
+    -- column name is a reserved keyword, contains capital letters, or
+    -- conflicts with the name of a column in the joined table.  An
+    -- example would be:  @dbrefQColumn =
+    -- \"\\\"table_name\\\".\\\"column_name\\\"\"@
   }
 
 instance Show (GDBRefInfo rt c p) where
   show ri = "DBRefInfo ? " ++ show (dbrefQColumn ri)
 
+-- | @DBRefInfo@ is a type alias for the common case that the
+-- reference in a 'GDBRefInfo' is a 'DBRef' (as opposed to a
+-- 'DBRefUnique').  The functions in this library do not care what
+-- type of reference is used.  The type is generalized to 'GDBRefInfo'
+-- just to make it easier to assign a selector to 'dbrefSelector' when
+-- the selector returns a 'DBRefUnique'.  For example,
+-- 'defaultDBRefInfo' returns a 'DBRefInfo' regardless of the flavor
+-- of reference actually encountered.
 type DBRefInfo = GDBRefInfo NormalRef
 
 data ExtractRef a = ExtractRef deriving (Show)
@@ -126,6 +204,17 @@ instance Extractor ExtractRef (Maybe (GDBRef rt a)) (DBRef (As alias a))
   extract _ (Just (DBRef k)) = THasOne $ DBRef k
   extract _ _                = error "Maybe DBRef is Nothing"
 
+-- | Creates a 'DBRefInfo' from a model @child@ that references
+-- @parent@.  For this to work, the @child@ type must be 'Generic' and
+-- must contain exactly one field of the any of the following types:
+--
+--   1. @'GDBRef' rt parent@, which matches both @'DBRef' parent@ and
+--   @'DBRefUnique' parent@.
+--
+--   2. @Maybe ('GDBRef' rt parent)@, for cases where the reference
+--   might be @NULL@.  Note, however, that an exception will be thrown
+--   if you call 'findAssociated' on a child whose reference is
+--   'Nothing'.
 defaultDBRefInfo :: (Model child, Model parent
                     , GetField ExtractRef child (DBRef parent)) =>
                     DBRefInfo child parent
