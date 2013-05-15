@@ -21,21 +21,44 @@ import Data.GetField
 import Database.PostgreSQL.ORM.DBSelect
 import Database.PostgreSQL.ORM.Model
 
+-- | A trivial 'ToRow' instance that can be passed to 'query'.
 newtype TrivParam = TrivParam [Action] deriving (Show)
 instance ToRow TrivParam where
   toRow (TrivParam actions) = actions
 
--- | How to find an @a@ given some predicate on @b@s ('assocSelect'),
--- or a particular @b@ ('assocQuery' and 'assocParam').
-data Association b a = Association {
-    assocSelect :: !(DBSelect (LookupRow a))
+-- | A data structure representing a relationship between a model @a@
+-- and a model @b@.  At a high level, an @Association a b@ tells you
+-- how to find rows of type @b@s given rows of type @a@.  More
+-- concretely, this boils down to being able to make two types of
+-- query.
+--
+--  * You already have an instance of type @a@, and want to find all
+--    the @b@s associated with it.  For that you use fields
+--    'assocQuery' and 'assocParam'.  If @a :: A@ and @assoc ::
+--    Association A B@, to get a list of @B@s you would say:
+--
+-- >   bs <- map lookupRow <$> query conn (assocQuery assoc) (assocParam assoc a)
+--
+--  * You want to look up a bunch of @b@s, but filter using predicates
+--    on the associated @a@s (e.g., get a list of users who have
+--    commented on posts by a particular user).  For this purpose, you
+--    can use 'assocSelect', which allows you to 'addWhere' predicates
+--    mentioning columns in both @a@ and @b@.
+--
+-- Note that an association is asymmetric.  It tells you how to get
+-- @b@s from @a@s, but not vice versa.  In practice, there will almost
+-- always be an association in the other direction, too.  Several
+-- functions in this file therefore create both 'Association's
+-- simultaneously and return them as a pair.
+data Association a b = Association {
+    assocSelect :: !(DBSelect (LookupRow b))
     -- ^ General select returning all fields of @a@ from the join
     -- relation between @a@ and @b@.
   , assocQuery :: !Query
     -- ^ An optimized 'Query' to find all the 'a's associated with a
     -- particular @b@.  This can often be done more efficiently than
     -- through 'assocSelect'.
-  , assocParam :: !(b -> TrivParam)
+  , assocParam :: !(a -> TrivParam)
     -- ^ The query parameters for the query returned by 'assocQuery'.
   }
 

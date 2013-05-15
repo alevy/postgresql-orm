@@ -2,7 +2,6 @@
 import Control.Exception
 import Database.PostgreSQL.ORM.CreateTable
 import Database.PostgreSQL.ORM.Model
-import Database.PostgreSQL.ORM.Relationships
 import Database.PostgreSQL.Simple
 import GHC.Generics
 import Data.AsTypeOf
@@ -22,8 +21,6 @@ data Foo = Foo {
   } deriving (Show, Generic)
 
 instance Model Foo
-instance HasParent Foo Bar
-instance HasMany Bar Foo
 
 mkFoo :: String -> Foo
 mkFoo name = Foo NullKey name Nothing
@@ -41,9 +38,6 @@ mkBar :: String -> Bar
 mkBar msg = Bar NullKey (Just n) msg Nothing
   where n = foldl (+) 0 $ map (toEnum . fromEnum) msg
 
-instance HasMany Bar Bar
-instance HasParent Bar Bar
-
 data Joiner = Joiner {
     jkey :: !DBKey
   , jcomment :: !String
@@ -54,12 +48,6 @@ instance Model Joiner
 
 joiner :: Joiner
 joiner = Joiner (DBKey 5) "join comment" (DBRef 1) Nothing
-
-instance Joinable Foo Bar where
-  -- joinTable = (joinThroughModel joiner) { jtAllowModification = True }
-  joinTable = joinDefault
-instance Joinable Bar Foo where
-  joinTable = joinReverse
 
 bar :: Bar
 bar = Bar NullKey (Just 44) "hi" Nothing
@@ -92,12 +80,14 @@ getOne k = bracket mkc close $ \c ->
   in r
 
 
+{-
 junk = do
   foos <- findAll c :: IO [Foo]
   bars <- findAll c :: IO [Bar]
-  sequence $ zipWith (addJoin c) foos (drop 4 bars)
-  sequence $ zipWith (addJoin c) foos (drop 19 bars)
-  sequence $ zipWith (addJoin c) (drop 41 foos) bars
+  -- sequence $ zipWith (addJoin c) foos (drop 4 bars)
+  -- sequence $ zipWith (addJoin c) foos (drop 19 bars)
+  -- sequence $ zipWith (addJoin c) (drop 41 foos) bars
+-}
 
 data Quizog = Quizog {
     qId :: !DBKey

@@ -41,7 +41,6 @@ library
                  , Database.PostgreSQL.ORM.CreateTable
                  , Database.PostgreSQL.ORM.DSL
                  , Database.PostgreSQL.ORM.Model
-                 , Database.PostgreSQL.ORM.Relationships
                  , Database.PostgreSQL.ORM.SqlType
   other-extensions: FlexibleContexts
                   , FlexibleInstances
