@@ -87,28 +87,34 @@ defaultDBRefInfo = ri
           , dbrefQColumn = modelQColumns childids !! getFieldPos extractor child
           }
 
-{-
+mkJoin :: DBSelect a -> DBSelect b -> Query -> Query -> DBSelect a
+mkJoin dbsa dbsb (Query kw) (Query on) = dbsa {
+    selJoins = selJoins dbsa ++ Join kw (selFrom dbsb) on : selJoins dbsb
+  }
+
 dbrefAssocs :: (Model child, Model parent) =>
                GDBRefInfo rt child parent
                -> (Association child parent, Association parent child)
 dbrefAssocs ri = (c_p, p_c)
   where idp = modelIdentifiers `gAsTypeOf1` ri
         idc = modelIdentifiers `gAsTypeOf2` ri
-        on = " ON " <> modelQPrimaryColumn idp <> " = " <> dbrefQColumn ri
+        on = Query $ "ON " <> modelQPrimaryColumn idp
+             <> " = " <> dbrefQColumn ri
+        psel = modelDBSelect `gAsTypeOf` (LookupRow $ undef1 ri)
+        csel = modelDBSelect `gAsTypeOf` (LookupRow $ undef2 ri)
         c_p = Association {
-            assocSelect = fix $ \r -> (modelDBSelect `asTypeOf` r) {
-               selJoins = [Query $ "JOIN " <> modelQTable idc <> on] }
+            assocSelect = mkJoin psel csel "JOIN" on
           , assocQuery = defaultModelLookupQuery idp
           , assocParam = \c -> TrivParam [toField $ dbrefSelector ri c]
           }
         p_c = Association {
-            assocSelect = fix $ \r -> (modelDBSelect `asTypeOf` r) {
-               selJoins = [Query $ "JOIN " <> modelQTable idp <> on] }
+            assocSelect = mkJoin csel psel "JOIN" on
           , assocQuery = Query $ modelSelectFragment idc <>
                          " WHERE " <> dbrefQColumn ri <> " = ?"
           , assocParam = \p -> TrivParam [toField $ primaryKey p]
           }
 
+{-
 
 has :: (Model child, Model parent, GetField ExtractRef child (DBRef parent)) =>
        Association parent child
