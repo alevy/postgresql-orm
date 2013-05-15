@@ -69,7 +69,8 @@ instance ToRow TrivParam where
 --    on the associated @a@s (e.g., get a list of users who have
 --    commented on posts by a particular user).  For this purpose, you
 --    can use 'assocSelect', which allows you to 'addWhere' predicates
---    mentioning columns in both @a@ and @b@.
+--    mentioning columns in both @a@ and @b@.  (Or use the helper
+--    function 'findAssociatedWhere', which wraps 'addWhere' for you.)
 --
 -- 'assocQuery' and 'assocParam' are strictly less general than
 -- 'assocQuery'.  However, in common situations the former may be
@@ -77,11 +78,11 @@ instance ToRow TrivParam where
 -- fields other than the primary key from @a@, and hence may be able
 -- to avoid touching @a@'s index in the database).
 --
--- Note that an association is asymmetric.  It tells you how to get
+-- Note that an @Association@ is asymmetric.  It tells you how to get
 -- @b@s from @a@s, but not vice versa.  In practice, there will almost
 -- always be an association in the other direction, too.  Several
--- functions in this file therefore create both 'Association's
--- simultaneously and return them as a pair.
+-- functions in this file therefore create an @Association@ and its
+-- inverse simultaneously, returning them as a pair.
 data Association a b = Association {
     assocSelect :: !(DBSelect (LookupRow b))
     -- ^ General select returning all fields of @a@ from the join
@@ -118,14 +119,13 @@ findAssociatedWhere assoc wh c p = map lookupRow <$> query c q p
 
 -- | A common type of association is when one model contains a 'DBRef'
 -- or 'DBRefUnique' pointing to another model.  In this case, the
--- model containing the 'DBRef' is called the /child/.  Conversely,
--- the referenced model (whose primary key is stored in the 'DBRef'
--- field of the child) is known as the /parent/.
+-- model containing the 'DBRef' is known as the /child/, and the
+-- referenced model is known as the /parent/.
 --
 -- Two pieces of information are required to describe a parent-child
--- relationship:  The field selector that extracts the Haskell 'DBRef'
--- from the haskell type @child@, and the name of the database column
--- that stores this 'DBRef' field.
+-- relationship:  First, the field selector that extracts the Haskell
+-- 'DBRef' from the haskell type @child@, and second the name of the
+-- database column that stores this 'DBRef' field.
 --
 -- For example, consider the following:
 --
@@ -165,7 +165,7 @@ findAssociatedWhere assoc wh c p = map lookupRow <$> query c q p
 -- be the case), a 'DBRefInfo' structure can be computed automatically
 -- by 'defaultDBRefInfo'.  This is the recommended way to produce a
 -- @GDBRefInfo@.  (Alternatively, see 'has' and 'belongsTo' to make
--- use of a @GDBRefInfo@ entirely implicit.)
+-- use of an entirely implicit @DBRefInfo@.)
 data GDBRefInfo reftype child parent = DBRefInfo {
     dbrefSelector :: !(child -> GDBRef reftype parent)
     -- ^ Field selector returning a reference.
@@ -205,8 +205,9 @@ instance Extractor ExtractRef (Maybe (GDBRef rt a)) (DBRef (As alias a))
   extract _ _                = error "Maybe DBRef is Nothing"
 
 -- | Creates a 'DBRefInfo' from a model @child@ that references
--- @parent@.  For this to work, the @child@ type must be 'Generic' and
--- must contain exactly one field of the any of the following types:
+-- @parent@.  For this to work, the @child@ type must be an instance
+-- of 'Generic' and must contain exactly one field of the any of the
+-- following types:
 --
 --   1. @'GDBRef' rt parent@, which matches both @'DBRef' parent@ and
 --   @'DBRefUnique' parent@.
@@ -233,6 +234,8 @@ mkJoin dbsa dbsb (Query kw) (Query on) = dbsa {
     -- XXX maybe concatenate where clauses
   }
 
+-- | Generate both the child-parent and parent-child 'Association's
+-- implied by a 'GDBRefInfo'.
 dbrefAssocs :: (Model child, Model parent) =>
                GDBRefInfo rt child parent
                -> (Association child parent, Association parent child)
@@ -255,10 +258,27 @@ dbrefAssocs ri = (c_p, p_c)
           , assocParam = \p -> TrivParam [toField $ primaryKey p]
           }
 
+-- | Short for
+--
+-- > snd $ dbrefAssocs defaultDBRefInfo
+--
+-- For example, given the @Author@ and @Post@ models described in the
+-- documentation for 'GDBRefInfo', you might say:
+--
+-- > author_post :: Association Author Post
+-- > author_post = has
+-- >
+-- > post_author :: Association Post Author
+-- > post_author = belongsTo
 has :: (Model child, Model parent, GetField ExtractRef child (DBRef parent)) =>
        Association parent child
 has = snd $ dbrefAssocs defaultDBRefInfo
 
+-- | Short for
+--
+-- > fst $ dbrefAssocs defaultDBRefInfo
+--
+-- See an example at 'has'.
 belongsTo :: (Model child, Model parent
              , GetField ExtractRef child (DBRef parent)) =>
              Association child parent
@@ -303,6 +323,7 @@ chainAssoc ab bc =
             selJoins = selJoins (assocSelect bc) ++ selJoins (assocSelect ab)
           }
 
+-- | Note that all names in a @JoinTable@ should be unquoted.
 data JoinTable a b = JoinTable {
     jtTable :: !S.ByteString
     -- ^ Name of the join table in the database.  (Not quoted.)
