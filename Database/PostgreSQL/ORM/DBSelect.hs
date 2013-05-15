@@ -108,7 +108,8 @@ emptyDBSelect = (to gdbsDefault) { selSelectKeyword = fromString "SELECT"
                                  , selFromKeyword = fromString "FROM" }
 
 renderDBSelect :: DBSelect a -> Query
-renderDBSelect dbs = Query $ toByteString $ gdbsQuery $ from dbs
+renderDBSelect dbs = Query $ if S.null q0 then q0 else S.tail q0
+  where q0 = toByteString $ gdbsQuery $ from dbs
 
 instance ToRow (DBSelect a) where
   toRow dbs = appEndo (gdbsParam $ from dbs) []

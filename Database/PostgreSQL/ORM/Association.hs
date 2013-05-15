@@ -90,6 +90,7 @@ defaultDBRefInfo = ri
 mkJoin :: DBSelect a -> DBSelect b -> Query -> Query -> DBSelect a
 mkJoin dbsa dbsb (Query kw) (Query on) = dbsa {
     selJoins = selJoins dbsa ++ Join kw (selFrom dbsb) on : selJoins dbsb
+    -- XXX maybe concatenate where clauses
   }
 
 dbrefAssocs :: (Model child, Model parent) =>
@@ -114,8 +115,6 @@ dbrefAssocs ri = (c_p, p_c)
           , assocParam = \p -> TrivParam [toField $ primaryKey p]
           }
 
-{-
-
 has :: (Model child, Model parent, GetField ExtractRef child (DBRef parent)) =>
        Association parent child
 has = snd $ dbrefAssocs defaultDBRefInfo
@@ -124,6 +123,23 @@ belongsTo :: (Model child, Model parent
              , GetField ExtractRef child (DBRef parent)) =>
              Association child parent
 belongsTo = fst $ dbrefAssocs defaultDBRefInfo
+
+chainAssoc :: (Model a, Model c) =>
+              Association a b -> Association b c -> Association a c
+chainAssoc ab bc = bc {
+    assocSelect = sel
+  , assocQuery = renderDBSelect $ addWhere sel
+                 (Query $ modelQPrimaryColumn idc <> " = ?") () 
+  , assocParam = \c -> TrivParam [toField $ primaryKey c]
+  }
+  where idc = modelIdentifiers `gAsTypeOf1` bc
+        sel = (assocSelect bc) {
+            selJoins = selJoins (assocSelect bc) ++ selJoins (assocSelect ab)
+          }
+
+
+
+{-
 
 
 nestAssoc :: Association a b -> Association b c -> Association a (b :. c)
@@ -254,7 +270,6 @@ data Comment = Comment {
   } deriving (Show, Generic)
 instance Model Comment where modelInfo = underscoreModelInfo "comment"
 
-{-
 
 author_posts :: Association Post Author
 author_posts = belongsTo
@@ -262,6 +277,7 @@ author_posts = belongsTo
 post_comments :: Association Comment Post
 post_comments = belongsTo
 
+{-
 author_comments :: Association Comment Author
 author_comments =  chainAssoc post_comments author_posts
 
@@ -310,3 +326,7 @@ c :: Connection
 {-# NOINLINE c #-}
 c = unsafePerformIO mkc
 
+dumpAssoc :: Association a b -> IO ()
+dumpAssoc a = do
+  printq $ renderDBSelect $ assocSelect a
+  printq $ assocQuery a
