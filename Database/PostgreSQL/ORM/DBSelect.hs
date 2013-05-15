@@ -4,11 +4,13 @@
 {-# LANGUAGE TypeOperators #-}
 
 module Database.PostgreSQL.ORM.DBSelect (
-    Clause(..), emptyClause, mkClause, appendClause
+    Clause(..), Join(..)
   , DBSelect(..), emptyDBSelect, renderDBSelect
   , setWhere, addWhere
   , setOrderBy, setLimit, setOffset
   , dbSelect
+    -- * Internal
+  , emptyClause, mkClause, appendClause
   ) where
 
 import Blaze.ByteString.Builder
@@ -33,49 +35,59 @@ nullClause :: Clause -> Bool
 nullClause (Clause q []) = S.null q
 nullClause _             = False
 
-mkClause :: (ToRow p) => Query -> p -> Clause
-mkClause (Query q) p = Clause q (toRow p)
+mkClause :: (ToRow p) => S.ByteString -> p -> Clause
+mkClause q p = Clause q (toRow p)
 
-appendClause :: Query -> Clause -> Clause -> Clause
+appendClause :: S.ByteString -> Clause -> Clause -> Clause
 appendClause _ a b | nullClause a = b
                    | nullClause b = a
-appendClause (Query delim) (Clause qa pa) (Clause qb pb) =
+appendClause delim (Clause qa pa) (Clause qb pb) =
   Clause (S.concat [qa, delim, qb]) (pa ++ pb)
+
+data Join = Join {
+    joinKeyword :: !S.ByteString
+  , joinTable :: !S.ByteString
+  , joinOn :: !S.ByteString
+  } deriving (Show)
 
 data DBSelect a = DBSelect {
     selWith :: !Clause
-  , selSelect :: !Query
+  , selSelectKeyword :: !S.ByteString
     -- ^ By default @\"SELECT\"@, but might usefully be set to
     -- something else such as @\"SELECT DISTINCT\"@ in some
     -- situations.
-  , selFields :: !Query
-  , selFromKeyword :: !Query
+  , selFields :: !S.ByteString
+  , selFromKeyword :: !S.ByteString
     -- ^ By default @\"FROM\"@, but could set it to empty for
     -- selecting simple values (such as internal database functions).
-  , selFrom :: !Query
-  , selJoins :: ![Query]
+  , selFrom :: !S.ByteString
+  , selJoins :: ![Join]
   , selWhere :: !Clause
-  , selGroupBy :: !Query
+  , selGroupBy :: !S.ByteString
   , selHaving :: !Clause
     -- below here, should appear outside any union
-  , selOrderBy :: !Query
+  , selOrderBy :: !S.ByteString
   , selLimit :: !Clause
   , selOffset :: !Clause
   } deriving (Show, Generic)
+
+space :: Builder
+space = fromChar ' '
 
 class GDBS f where
   gdbsDefault :: f p
   gdbsQuery :: f p -> Builder
   gdbsParam :: f p -> Endo [Action]
-instance GDBS (K1 i Query) where
-  gdbsDefault = K1 (Query S.empty)
-  gdbsQuery (K1 (Query bs)) | S.null bs = mempty
-                            | otherwise = fromByteString bs <> fromChar ' '
+instance GDBS (K1 i S.ByteString) where
+  gdbsDefault = K1 S.empty
+  gdbsQuery (K1 bs) | S.null bs = mempty
+                    | otherwise = space <> fromByteString bs
   gdbsParam _ = mempty
-instance GDBS (K1 i [Query]) where
+instance GDBS (K1 i [Join]) where
   gdbsDefault = K1 []
-  gdbsQuery (K1 qs) = mconcat $ map doq qs
-    where doq q = fromByteString (fromQuery q) <> fromChar ' '
+  gdbsQuery (K1 js) = mconcat $ map doj js
+    where doj (Join kw tb on) = space <> fromByteString kw <> space <>
+                                fromByteString tb <> space <> fromByteString on
   gdbsParam _ = mempty
 instance GDBS (K1 i Clause) where
   gdbsDefault = K1 emptyClause
@@ -92,7 +104,7 @@ instance (GDBS f) => GDBS (M1 i c f) where
   gdbsParam = gdbsParam . unM1
 
 emptyDBSelect :: DBSelect a
-emptyDBSelect = (to gdbsDefault) { selSelect = fromString "SELECT"
+emptyDBSelect = (to gdbsDefault) { selSelectKeyword = fromString "SELECT"
                                  , selFromKeyword = fromString "FROM" }
 
 renderDBSelect :: DBSelect a -> Query
@@ -101,16 +113,24 @@ renderDBSelect dbs = Query $ toByteString $ gdbsQuery $ from dbs
 instance ToRow (DBSelect a) where
   toRow dbs = appEndo (gdbsParam $ from dbs) []
 
+parenthesize :: S.ByteString -> S.ByteString
+parenthesize bs =
+  toByteString $ fromChar '(' <> fromByteString bs <> fromChar ')'
+
 setWhere :: (ToRow p) => DBSelect a -> Query -> p -> DBSelect a
-setWhere dbs q p = dbs { selWhere = mkClause q p }
+setWhere dbs (Query q) p = dbs {
+    selWhere = mkClause ("WHERE " <> parenthesize q) p
+  }
 
 addWhere :: (ToRow p) => DBSelect a -> Query -> p -> DBSelect a
-addWhere dbs@DBSelect{ selWhere = wh } q@(Query q') p = dbs { selWhere = newwh }
-  where newwh | nullClause wh = mkClause (Query $ "WHERE " <> q') p 
-              | otherwise     = appendClause " AND " wh $ mkClause q p
+addWhere dbs@DBSelect{ selWhere = wh } q@(Query bs) p
+  | nullClause wh = setWhere dbs q p
+  | otherwise = dbs {
+        selWhere = appendClause " AND " wh $ mkClause (parenthesize bs) p
+      }
 
 setOrderBy :: DBSelect a -> Query -> DBSelect a
-setOrderBy dbs ob = dbs { selOrderBy = "ORDER BY " <> ob }
+setOrderBy dbs (Query ob) = dbs { selOrderBy = "ORDER BY " <> ob }
 
 setLimit :: DBSelect a -> Int -> DBSelect a
 setLimit dbs i = dbs { selLimit = mkClause "LIMIT ?" (Only i) }
@@ -118,10 +138,5 @@ setLimit dbs i = dbs { selLimit = mkClause "LIMIT ?" (Only i) }
 setOffset :: DBSelect a -> Int -> DBSelect a
 setOffset dbs i = dbs { selOffset = mkClause "OFFSET ?" (Only i) }
 
-newtype RenderedToRow = RenderedToRow [Action] deriving (Show)
-instance ToRow RenderedToRow where toRow (RenderedToRow as) = as
-
 dbSelect :: (FromRow a) => Connection -> DBSelect a -> IO [a]
-dbSelect c dbs =
-  case toRow dbs of [] -> query_ c (renderDBSelect dbs)
-                    as -> query c (renderDBSelect dbs) (RenderedToRow as)
+dbSelect c dbs = query c (renderDBSelect dbs) dbs

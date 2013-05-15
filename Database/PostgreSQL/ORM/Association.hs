@@ -10,10 +10,8 @@ module Database.PostgreSQL.ORM.Association where
 
 import qualified Data.ByteString as S
 import Data.Function
-import Data.Functor
 import Data.Int
 import Data.List
-import Data.Maybe
 import Data.Monoid
 import Database.PostgreSQL.Simple
 import Database.PostgreSQL.Simple.ToField
@@ -36,7 +34,7 @@ instance ToRow TrivParam where
 
 -- | How to find an @a@ given some predicate on @b@s ('assocSelect'),
 -- or a particular @b@ ('assocQuery' and 'assocParam').
-data Association a b = Association {
+data Association b a = Association {
     assocSelect :: !(DBSelect (LookupRow a))
     -- ^ General select returning all fields of @a@ from the join
     -- relation between @a@ and @b@.
@@ -48,7 +46,7 @@ data Association a b = Association {
     -- ^ The query parameters for the query returned by 'assocQuery'.
   }
 
-instance Show (Association a b) where
+instance Show (Association b a) where
   show assoc = "Association " ++ show (assocSelect assoc) ++ " " ++
                show (assocQuery assoc) ++ " ?"
 
@@ -89,6 +87,7 @@ defaultDBRefInfo = ri
           , dbrefQColumn = modelQColumns childids !! getFieldPos extractor child
           }
 
+{-
 dbrefAssocs :: (Model child, Model parent) =>
                GDBRefInfo rt child parent
                -> (Association child parent, Association parent child)
@@ -98,23 +97,26 @@ dbrefAssocs ri = (c_p, p_c)
         on = " ON " <> modelQPrimaryColumn idp <> " = " <> dbrefQColumn ri
         c_p = Association {
             assocSelect = fix $ \r -> (modelDBSelect `asTypeOf` r) {
+               selJoins = [Query $ "JOIN " <> modelQTable idc <> on] }
+          , assocQuery = defaultModelLookupQuery idp
+          , assocParam = \c -> TrivParam [toField $ dbrefSelector ri c]
+          }
+        p_c = Association {
+            assocSelect = fix $ \r -> (modelDBSelect `asTypeOf` r) {
                selJoins = [Query $ "JOIN " <> modelQTable idp <> on] }
           , assocQuery = Query $ modelSelectFragment idc <>
                          " WHERE " <> dbrefQColumn ri <> " = ?"
           , assocParam = \p -> TrivParam [toField $ primaryKey p]
           }
-        p_c = Association {
-            assocSelect = fix $ \r -> (modelDBSelect `asTypeOf` r) {
-               selJoins = [Query $ "JOIN " <> modelQTable idc <> on] }
-          , assocQuery = defaultModelLookupQuery idp
-          , assocParam = \c -> TrivParam [toField $ dbrefSelector ri c]
-          }
 
-has :: (Model a, Model b, GetField ExtractRef b (DBRef a)) => Association a b
+
+has :: (Model child, Model parent, GetField ExtractRef child (DBRef parent)) =>
+       Association parent child
 has = snd $ dbrefAssocs defaultDBRefInfo
 
-belongsTo :: (Model a, Model b, GetField ExtractRef b (DBRef a)) =>
-             Association b a
+belongsTo :: (Model child, Model parent
+             , GetField ExtractRef child (DBRef parent)) =>
+             Association child parent
 belongsTo = fst $ dbrefAssocs defaultDBRefInfo
 
 
@@ -223,11 +225,44 @@ jtAssocs :: (Model a, Model b) =>
 jtAssocs jt = (jtAssoc jt, jtAssoc $ jtFlip jt)
 
 
-
+-}
 
 
 data T1 = T1 deriving (Show, Generic)
 instance RowAlias T1
+
+data Author = Author {
+    authorId :: DBKey
+  } deriving (Show, Generic)
+instance Model Author where modelInfo = underscoreModelInfo "author"
+
+data Post = Post {
+    postId :: DBKey
+  , postAuthorId :: DBRef Author
+  } deriving (Show, Generic)
+instance Model Post where modelInfo = underscoreModelInfo "post"
+
+data Comment = Comment {
+    commentId :: DBKey
+  , commentPostId :: DBRef Post
+  } deriving (Show, Generic)
+instance Model Comment where modelInfo = underscoreModelInfo "comment"
+
+{-
+
+author_posts :: Association Post Author
+author_posts = belongsTo
+
+post_comments :: Association Comment Post
+post_comments = belongsTo
+
+author_comments :: Association Comment Author
+author_comments =  chainAssoc post_comments author_posts
+
+comment_authors :: Association Author Comment
+comment_authors = chainAssoc (has :: Association Author Post)
+                  (has :: Association Post Comment)
+
 
 data Quizog = Quizog {
     qId :: !DBKey
@@ -260,6 +295,7 @@ exr = ExtractRef
 
 myjt :: JoinTable Quizog RefTest
 myjt = defaultJoinTable
+-}
 
 mkc :: IO Connection
 mkc = connectPostgreSQL ""
@@ -267,3 +303,4 @@ mkc = connectPostgreSQL ""
 c :: Connection
 {-# NOINLINE c #-}
 c = unsafePerformIO mkc
+

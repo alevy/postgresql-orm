@@ -434,8 +434,8 @@ defaultModelIdentifiers mi = ModelIdentifiers {
 
 defaultModelDBSelect :: ModelIdentifiers a -> DBSelect (LookupRow a)
 defaultModelDBSelect mi = emptyDBSelect {
-    selFields = Query $ S.intercalate ", " $ modelQColumns mi
-  , selFrom = Query $ modelQTable mi
+    selFields = S.intercalate ", " $ modelQColumns mi
+  , selFrom = modelQTable mi
   }
 
 data ModelQueries a = ModelQueries {
@@ -640,10 +640,9 @@ joinModelDBSelect :: (Model a, Model b) =>
                      DBSelect (LookupRow a) -> DBSelect (LookupRow b)
                      -> DBSelect (LookupRow (a :. b))
 joinModelDBSelect la lb = la {
-      selFields = Query $ fromQuery (selFields la) <> ", " <>
-                          fromQuery (selFields lb)
+      selFields = selFields la <> ", " <> selFields lb
     , selJoins = selJoins la ++
-                 (Query $ "CROSS JOIN " <> fromQuery (selFrom lb)) :
+                 Join "CROSS JOIN" (selFrom lb) "" :
                  selJoins lb
   }
 
