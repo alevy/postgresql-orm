@@ -92,7 +92,7 @@ instance GDBS (K1 i [Join]) where
 instance GDBS (K1 i Clause) where
   gdbsDefault = K1 emptyClause
   gdbsQuery (K1 cl) | S.null (clQuery cl) = mempty
-                    | otherwise = fromByteString (clQuery cl) <> fromChar ' '
+                    | otherwise = space <> fromByteString (clQuery cl)
   gdbsParam (K1 cl) = Endo ((clParam cl) ++)
 instance (GDBS a, GDBS b) => GDBS (a :*: b) where
   gdbsDefault = gdbsDefault :*: gdbsDefault

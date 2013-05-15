@@ -9,7 +9,6 @@
 module Database.PostgreSQL.ORM.Association where
 
 import qualified Data.ByteString as S
-import Data.Function
 import Data.Int
 import Data.List
 import Data.Monoid
@@ -151,19 +150,16 @@ chainAssoc ab bc =
       }
     _ -> bc { assocSelect = sel
             , assocQuery = renderDBSelect $ addWhere sel
-                           (Query $ modelQPrimaryColumn idc <> " = ?") () 
-            , assocParam = \c -> TrivParam [toField $ primaryKey c]
+                           (Query $ modelQPrimaryColumn ida <> " = ?") () 
+            , assocParam = \a -> TrivParam [toField $ primaryKey a]
             }
   where idb = modelIdentifiers `gAsTypeOf1` ab
-        idc = modelIdentifiers `gAsTypeOf1` bc
+        ida = modelIdentifiers `gAsTypeOf2` ab
         subquery = S.concat ["(", fromQuery $ assocQuery ab
                             , ") AS ", modelQTable idb]
         sel = (assocSelect bc) {
             selJoins = selJoins (assocSelect bc) ++ selJoins (assocSelect ab)
           }
-
-
-{-
 
 data JoinTable a b = JoinTable {
     jtTable :: !S.ByteString
@@ -230,29 +226,26 @@ jtAssoc :: (Model a, Model b) => JoinTable a b -> (Association a b)
 jtAssoc jt = Association {
     assocSelect = sel
   , assocQuery = q
-  , assocParam = \b -> TrivParam [toField $ primaryKey b]
+  , assocParam = \a -> TrivParam [toField $ primaryKey a]
   }
   where ida = modelIdentifiers `gAsTypeOf2` jt
         idb = modelIdentifiers `gAsTypeOf1` jt
-        joins = [Query $ "JOIN " <> jtQTable jt <>
-                 " ON " <> modelQPrimaryColumn ida <> " = " <> jtQColumnA jt
-                , Query $ "JOIN " <> modelQTable idb <>
-                  " ON " <> jtQColumnB jt <> " = " <> modelQPrimaryColumn idb]
-          
-        sel = sela { selJoins = selJoins sela ++ joins }
-          where sela = modelDBSelect `asTypeOf` sel
+        joins = [Join "JOIN" (jtQTable jt) $
+                 "ON " <> modelQPrimaryColumn idb <> " = " <> jtQColumnB jt
+                , Join "JOIN" (modelQTable ida) $
+                  "ON " <> jtQColumnA jt <> " = " <> modelQPrimaryColumn ida]
+        sel = selb { selJoins = selJoins selb ++ joins }
+          where selb = modelDBSelect `asTypeOf` sel
         q = Query $ S.concat [
-            modelSelectFragment ida, " JOIN ", jtQTable jt
-            , " ON ", modelQPrimaryColumn ida, " = ", jtQColumnA jt
-            , " WHERE ", jtQColumnB jt, " = ?"
+            modelSelectFragment idb, " JOIN ", jtQTable jt
+            , " ON ", modelQPrimaryColumn idb, " = ", jtQColumnB jt
+            , " WHERE ", jtQColumnA jt, " = ?"
           ]
 
 jtAssocs :: (Model a, Model b) =>
             JoinTable a b -> (Association a b, Association b a)
 jtAssocs jt = (jtAssoc jt, jtAssoc $ jtFlip jt)
 
-
--}
 
 
 data T1 = T1 deriving (Show, Generic)
@@ -276,18 +269,21 @@ data Comment = Comment {
 instance Model Comment where modelInfo = underscoreModelInfo "comment"
 
 
-author_posts :: Association Post Author
-author_posts = belongsTo
+author_posts :: Association Author Post
+post_author :: Association Post Author
+(post_author, author_posts) = dbrefAssocs defaultDBRefInfo
 
-post_comments :: Association Comment Post
-post_comments = belongsTo
 
-author_comments :: Association Comment Author
-author_comments =  chainAssoc post_comments author_posts
+post_comments :: Association Post Comment
+comment_post :: Association Comment Post
+(comment_post, post_comments) = dbrefAssocs defaultDBRefInfo
 
-comment_authors :: Association Author Comment
-comment_authors = chainAssoc (has :: Association Author Post)
-                  (has :: Association Post Comment)
+comment_author :: Association Comment Author
+comment_author = chainAssoc comment_post post_author
+
+author_comments :: Association Author Comment
+author_comments =  chainAssoc author_posts post_comments
+
 
 
 data Quizog = Quizog {
@@ -297,6 +293,17 @@ data Quizog = Quizog {
   , qEd :: !String
   } deriving (Show, Generic)
 instance Model Quizog
+
+quizog :: Quizog
+quizog = Quizog NullKey (Just 0) "Quizog!!!" "Q.E.D."
+
+comment_quizog_table :: JoinTable Comment Quizog
+comment_quizog_table = defaultJoinTable
+
+comment_quizog :: Association Comment Quizog
+quizog_comment :: Association Quizog Comment
+(comment_quizog, quizog_comment) = jtAssocs comment_quizog_table
+
 
 data RefTest = RefTest { rtId :: DBKey
                        , rtRef :: (Maybe (DBRefUnique Quizog))
