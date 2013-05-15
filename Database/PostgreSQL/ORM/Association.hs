@@ -24,7 +24,6 @@ import Database.PostgreSQL.ORM.Model
 import Database.PostgreSQL.ORM.SqlType
 
 import GHC.Generics
-import Database.PostgreSQL.ORM.CreateTable
 import System.IO.Unsafe
 
 newtype TrivParam = TrivParam [Action] deriving (Show)
@@ -70,9 +69,11 @@ instance Extractor ExtractRef (GDBRef rt a) (DBRef (As alias a)) THasOne where
   extract _ (DBRef k) = THasOne $ DBRef k
 instance Extractor ExtractRef (Maybe (GDBRef rt a)) (DBRef a) THasOne where
   extract _ (Just (DBRef k)) = THasOne $ DBRef k
+  extract _ _                = error "Maybe DBRef is Nothing"
 instance Extractor ExtractRef (Maybe (GDBRef rt a)) (DBRef (As alias a))
          THasOne where
   extract _ (Just (DBRef k)) = THasOne $ DBRef k
+  extract _ _                = error "Maybe DBRef is Nothing"
 
 defaultDBRefInfo :: (Model child, Model parent
                     , GetField ExtractRef child (DBRef parent)) =>
@@ -126,8 +127,9 @@ belongsTo = fst $ dbrefAssocs defaultDBRefInfo
 splitLast :: [a] -> Maybe ([a], a)
 splitLast [] = Nothing
 splitLast s = Just $ go s
-  where go [a] = ([], a)
+  where go [a]    = ([], a)
         go (a:as) = case go as of (as', a') -> (a:as', a')
+        go []     = error "splitLast"
 
 nestAssoc :: Association a b -> Association b c -> Association (a :. b) c
 nestAssoc ab bc = Association {
@@ -275,8 +277,9 @@ post_author :: Association Post Author
 
 
 post_comments :: Association Post Comment
+post_comments = has
 comment_post :: Association Comment Post
-(comment_post, post_comments) = dbrefAssocs defaultDBRefInfo
+comment_post = belongsTo
 
 comment_author :: Association Comment Author
 comment_author = chainAssoc comment_post post_author
