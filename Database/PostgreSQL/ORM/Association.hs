@@ -114,7 +114,7 @@ findAssociated assoc c a =
 findAssociatedWhere :: (Model b, ToRow p) =>
                        Association a b -> Query -> Connection -> p -> IO [b]
 findAssociatedWhere assoc wh c p = map lookupRow <$> query c q p
-  where q = renderDBSelect $ addWhere (assocSelect assoc) wh ()
+  where q = renderDBSelect $ addWhere wh () (assocSelect assoc)
 
 findBothAssociatedWhere :: (Model a, Model b, ToRow p) =>
                            Association a b -> Query -> Connection -> p
@@ -124,7 +124,7 @@ findBothAssociatedWhere assoc wh c p = r
                 :: (Model a) => IO [a :. b] -> DBSelect (LookupRow a)) r
         insa = \sel -> sel {
           selFields = selFields asel <> ", " <> selFields sel }
-        q = renderDBSelect $ insa $ addWhere (assocSelect assoc) wh ()
+        q = renderDBSelect $ insa $ addWhere wh () $ assocSelect assoc
         r = map lookupRow <$> query c q p
 
 
@@ -324,8 +324,9 @@ chainAssoc ab bc =
       , assocParam = assocParam ab
       }
     _ -> bc { assocSelect = sel
-            , assocQuery = renderDBSelect $ addWhere sel
+            , assocQuery = renderDBSelect $ addWhere
                            (Query $ modelQPrimaryColumn ida <> " = ?") () 
+                           sel
             , assocParam = \a -> TrivParam [toField $ primaryKey a]
             }
   where idb = modelIdentifiers `gAsTypeOf1` ab

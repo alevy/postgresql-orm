@@ -122,26 +122,27 @@ parenthesize :: S.ByteString -> S.ByteString
 parenthesize bs =
   toByteString $ fromChar '(' <> fromByteString bs <> fromChar ')'
 
-setWhere :: (ToRow p) => DBSelect a -> Query -> p -> DBSelect a
-setWhere dbs (Query q) p = dbs {
+setWhere :: (ToRow p) => Query -> p -> DBSelect a -> DBSelect a
+setWhere (Query q) p dbs = dbs {
     selWhere = mkClause ("WHERE " <> parenthesize q) p
   }
 
-addWhere :: (ToRow p) => DBSelect a -> Query -> p -> DBSelect a
-addWhere dbs@DBSelect{ selWhere = wh } q@(Query bs) p
-  | nullClause wh = setWhere dbs q p
+addWhere :: (ToRow p) => Query -> p -> DBSelect a -> DBSelect a
+addWhere q@(Query bs) p dbs@DBSelect{ selWhere = wh } 
+  | nullClause wh = setWhere q p dbs
   | otherwise = dbs {
         selWhere = appendClause " AND " wh $ mkClause (parenthesize bs) p
       }
 
-setOrderBy :: DBSelect a -> Query -> DBSelect a
-setOrderBy dbs (Query ob) = dbs { selOrderBy = "ORDER BY " <> ob }
+setOrderBy :: Query -> DBSelect a -> DBSelect a
+setOrderBy (Query ob) dbs = dbs { selOrderBy = "ORDER BY " <> ob }
 
-setLimit :: DBSelect a -> Int -> DBSelect a
-setLimit dbs i = dbs { selLimit = mkClause "LIMIT ?" (Only i) }
+setLimit :: Int -> DBSelect a -> DBSelect a
+setLimit i dbs = dbs { selLimit = mkClause "LIMIT ?" (Only i) }
 
 setOffset :: DBSelect a -> Int -> DBSelect a
 setOffset dbs i = dbs { selOffset = mkClause "OFFSET ?" (Only i) }
 
 dbSelect :: (FromRow a) => Connection -> DBSelect a -> IO [a]
 dbSelect c dbs = query c (renderDBSelect dbs) dbs
+
