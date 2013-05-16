@@ -75,12 +75,12 @@ describeTable cn t = do
                           \ on confrelid = pg_class.oid\
                           \ where conrelid = ?"
                           (Only tbloid)
-  let _ = constraints :: [(Char, V.Vector Int16, Maybe S.ByteString)]
+  let _ = constraints :: [(String, V.Vector Int16, Maybe S.ByteString)]
   return $ map (\c -> foldl appConstr c constraints) cs1
     where appConstr ci (ct, ck, mn)
             | V.length ck == 1, colNum ci == ck V.! 0 = appConstr1 ci ct mn
             | otherwise                           = ci
-          appConstr1 ci 'p' _ = ci { colPrimary = True }
-          appConstr1 ci 'u' _ = ci { colUnique = True }
-          appConstr1 ci 'f' n@(Just _) = ci { colReferences = n }
+          appConstr1 ci "p" _ = ci { colPrimary = True }
+          appConstr1 ci "u" _ = ci { colUnique = True }
+          appConstr1 ci "f" n@(Just _) = ci { colReferences = n }
           appConstr1 ci _ _ = ci
