@@ -43,7 +43,6 @@ data Bar = Bar {
   , barName :: !String
   , barParent :: !(Maybe (DBRef Bar))
   } deriving (Show, Generic)
-
 instance Model Bar where modelInfo = underscoreModelInfo "bar"
 
 mkBar :: String -> Bar
@@ -93,6 +92,7 @@ getOne k = bracket mkc close $ \c ->
 
 data T1 = T1 deriving (Show, Generic)
 instance RowAlias T1
+
 
 data Author = Author {
     authorId :: DBKey

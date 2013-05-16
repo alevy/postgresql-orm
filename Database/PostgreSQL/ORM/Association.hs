@@ -6,7 +6,7 @@
 
 module Database.PostgreSQL.ORM.Association (
     Association
-  , findAssociated, findAssociatedWhere
+  , findAssociated, findAssociatedWhere, findBothAssociatedWhere
     -- * Associations based on parent-child relationships
   , GDBRefInfo(..), DBRefInfo, defaultDBRefInfo, dbrefAssocs, has, belongsTo
     -- * Join table Associations
@@ -115,6 +115,17 @@ findAssociatedWhere :: (Model b, ToRow p) =>
                        Association a b -> Query -> Connection -> p -> IO [b]
 findAssociatedWhere assoc wh c p = map lookupRow <$> query c q p
   where q = renderDBSelect $ addWhere (assocSelect assoc) wh ()
+
+findBothAssociatedWhere :: (Model a, Model b, ToRow p) =>
+                           Association a b -> Query -> Connection -> p
+                           -> IO [a :. b]
+findBothAssociatedWhere assoc wh c p = r
+  where asel = (const $ modelDBSelect
+                :: (Model a) => IO [a :. b] -> DBSelect (LookupRow a)) r
+        insa = \sel -> sel {
+          selFields = selFields asel <> ", " <> selFields sel }
+        q = renderDBSelect $ insa $ addWhere (assocSelect assoc) wh ()
+        r = map lookupRow <$> query c q p
 
 
 -- | A common type of association is when one model contains a 'DBRef'
