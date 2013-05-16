@@ -5,7 +5,7 @@
 {-# LANGUAGE TypeOperators #-}
 
 module Database.PostgreSQL.ORM.Association (
-    Association
+    Association(..)
   , findAssociated, findAssociatedWhere, findBothAssociatedWhere
     -- * Associations based on parent-child relationships
   , GDBRefInfo(..), DBRefInfo, defaultDBRefInfo, dbrefAssocs, has, belongsTo
