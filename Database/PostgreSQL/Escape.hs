@@ -5,7 +5,8 @@
 
 module Database.PostgreSQL.Escape (
     fmtSql, quoteIdent, Id(..)
-  , buildSql, buildAction, buildLiteral, buildByteA, buildIdent
+  , buildSql, buildSqlFromActions
+  , buildAction, buildLiteral, buildByteA, buildIdent
   ) where
 
 import Blaze.ByteString.Builder
@@ -213,13 +214,11 @@ buildAction (Escape bs)      = buildLiteral bs
 buildAction (EscapeByteA bs) = buildByteA bs
 buildAction (Many bs)        = mconcat $ map buildAction bs
 
-
--- | A builder version of 'fmtSql', possibly useful if you are about
--- to concatenate various individually formatted query fragments and
--- want to save the work of concatenating each individually.
-buildSql :: (ToRow p) => Query -> p -> Builder
-buildSql (Query template) param =
-  intercatlate (split template) (map buildAction $ toRow param)
+-- | A lower-level function used by 'buildSql' and 'fmtSql'.  You
+-- probably don't need to call it directly.
+buildSqlFromActions :: Query -> [Action] -> Builder
+buildSqlFromActions (Query template) actions =
+  intercatlate (split template) (map buildAction $ actions)
   where intercatlate (t:ts) (p:ps) = t <> p <> intercatlate ts ps
         intercatlate [t] []        = t
         intercatlate _ _           =
@@ -227,6 +226,13 @@ buildSql (Query template) param =
         split s = case S.breakByte (c2b '?') s of
           (h,t) | S.null t  -> [fromByteString h]
                 | otherwise -> fromByteString h : split (S.unsafeTail t)
+
+-- | A builder version of 'fmtSql', possibly useful if you are about
+-- to concatenate various individually formatted query fragments and
+-- want to save the work of concatenating each individually.
+buildSql :: (ToRow p) => Query -> p -> Builder
+{-# INLINE buildSql #-}
+buildSql q p = buildSqlFromActions q (toRow p)
 
 -- | Take a SQL template containing \'?\' characters and a list of
 -- paremeters whose length must match the number of \'?\' characters,
@@ -245,4 +251,5 @@ buildSql (Query template) param =
 -- @\"\'param''string'\"@, which is a single string containing an
 -- apostrophe, when you probably wanted two strings.
 fmtSql :: (ToRow p) => Query -> p -> Query
-fmtSql template param = Query $ toByteString $ buildSql template param
+{-# INLINE fmtSql #-}
+fmtSql q p = Query $ toByteString $ buildSql q p
