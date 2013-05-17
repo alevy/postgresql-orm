@@ -823,7 +823,7 @@ dbSelectModel c dbs = map lookupRow <$> dbSelect c dbs
 -- > findAll c = findWhere "TRUE" c ()
 findWhere :: (ToRow parms, Model r) => Query -> Connection -> parms -> IO [r]
 findWhere whereClause c parms =
-  dbSelectModel c $ addWhere modelDBSelect whereClause parms
+  dbSelectModel c $ addWhere whereClause parms modelDBSelect
 
 -- | A variant of 'findWhere' that does not require query parameters.
 findWhere_ :: (Model r) => Query -> Connection -> IO [r]
