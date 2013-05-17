@@ -129,9 +129,9 @@ buildIdent ident
 quoteIdent :: S.ByteString -> S.ByteString
 quoteIdent = toByteString . buildIdent
           
--- | An identifier is a column name.  When rendered into a SQL query
--- by fmtSql, it will be double-quoted, rather than single-quoted.
--- For example:
+-- | An identifier is a table or column name.  When rendered into a
+-- SQL query by 'fmtSql', it will be double-quoted, rather than
+-- single-quoted.  For example:
 --
 -- >>> fmtSql "select * from ? where name = ?" (Id "MyTable", "A Name")
 -- "select * from \"MyTable\" where name =  E'A Name'"
