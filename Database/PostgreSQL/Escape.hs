@@ -9,6 +9,7 @@ module Database.PostgreSQL.Escape (
   ) where
 
 import Blaze.ByteString.Builder
+import Blaze.ByteString.Builder.Char8 (fromChar)
 import Blaze.ByteString.Builder.Internal
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Internal as S
@@ -20,7 +21,7 @@ import Database.PostgreSQL.Simple.ToField
 import Database.PostgreSQL.Simple.ToRow
 import Database.PostgreSQL.Simple.Types
 import Foreign.Marshal.Alloc (mallocBytes)
-import Foreign.Storable (poke, pokeByteOff)
+import Foreign.Storable (pokeByteOff)
 import Foreign.Ptr
 import GHC.Prim (Addr#, and#, geAddr#, geWord#, int2Word#
                 , minusAddr#, ord# , plusAddr#, readWord8OffAddr#
@@ -126,9 +127,12 @@ buildIdent ident
 -- column\" names (e.g., @oid@, @tableoid@, @xmin@, @cmin@, @xmax@,
 -- @cmax@, @ctid@) are likely to produce unexpected results even when
 -- properly quoted.
+--
+-- See 'Id' for a convenient way to include quoted identifiers in
+-- parameter lists.
 quoteIdent :: S.ByteString -> S.ByteString
 quoteIdent = toByteString . buildIdent
-          
+
 -- | An identifier is a table or column name.  When rendered into a
 -- SQL query by 'fmtSql', it will be double-quoted, rather than
 -- single-quoted.  For example:
@@ -187,23 +191,20 @@ copyByteToNibbles src dst = IO $ \rw0 ->
     (# rw1, w #) -> (# uncheckedWriteNibbles# dst w rw1, () #)
 
 buildByteA :: S.ByteString -> Builder
-buildByteA bs = mappend (fromByteString " E'\\\\x") $
+buildByteA bs = equote $
   fromBuildStepCont $ \cont (BufRange (Ptr bb0) (Ptr be0)) ->
   S.unsafeUseAsCStringLen bs $ \(Ptr inptr0, I# inlen0) -> do
   let ine = plusAddr# inptr0 inlen0
       fill oute inp outp
-        | inp `geAddr#` ine = closeQuote (Ptr oute) (Ptr outp)
+        | inp `geAddr#` ine = cont (BufRange (Ptr outp) (Ptr oute))
         | plusAddr# outp 2# `geAddr#` oute = return $
             bufferFull (2 * (I# (ine `minusAddr#` inp)) + 1) (Ptr outp) $
             \(BufRange (Ptr bb) (Ptr be)) -> fill be inp bb
         | otherwise = do copyByteToNibbles inp outp
                          fill oute (inp `plusAddr#` 1#) (outp `plusAddr#` 2#)
-      closeQuote oute outp
-        | outp >= oute =
-          return $ bufferFull 1 outp $ \(BufRange bb be) -> closeQuote be bb
-        | otherwise = do poke outp (c2b '\'')
-                         cont (BufRange (outp `plusPtr` 1) oute)
   fill be0 inptr0 bb0
+  where equote b = mconcat [fromByteString " E'\\\\x", b, fromChar '\'']
+
 
 
 buildAction :: Action -> Builder
