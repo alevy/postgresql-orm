@@ -23,6 +23,7 @@ library
                , bytestring
                , directory
                , filepath
+               , ghc-prim
                , postgresql-simple
                , process
                , text
