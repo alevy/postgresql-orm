@@ -57,6 +57,7 @@ import GHC.Generics
 
 import Data.AsTypeOf
 import Data.RequireSelector
+import Database.PostgreSQL.Escape (quoteIdent)
 import Database.PostgreSQL.ORM.DBSelect
 
 -- | A type large enough to hold database primary keys.  Do not use
@@ -405,18 +406,6 @@ data ModelIdentifiers a = ModelIdentifiers {
     -- the primary key.  These are the columns that should be included
     -- in an @INSERT@ or @UPDATE@.
   } deriving (Show)
-
--- | Quote a SQL identifier (such as a column or field name) with
--- double quotes.  Note this has nothing to do with quoting /values/,
--- which must be quoted using single quotes.  (Anyway, all values
--- should be passed as query parameters, meaning @postgresql-simple@
--- will handle quoting them.)
-quoteIdent :: S.ByteString -> S.ByteString
-quoteIdent iden = fromString $ '"' : (go $ S8.unpack iden)
-  where go ('"':cs) = '"':'"':go cs
-        go ('\0':_) = error $ "q: illegal NUL character in " ++ show iden
-        go (c:cs)   = c:go cs
-        go []       = '"':[]
 
 -- | The default simply quotes the 'modelInfo' and 'modelColumns'
 -- fields of 'ModelInfo' using 'quoteIdent'.

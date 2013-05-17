@@ -98,9 +98,11 @@ buildIdent ident
         isDQuote _    = False
 
 -- | Quote an identifier such as a table or column name using
--- double-quote characters.  Uses a unicode escape sequence to escape
--- \'?\' characters, which would otherwise be expanded by
--- 'formatQuery'.
+-- double-quote characters.  Note this has nothing to do with quoting
+-- /values/, which must be quoted using single quotes.  (Anyway, all
+-- values should be quoted by 'query' or 'fmtSql'.)  This function
+-- uses a unicode escape sequence to escape \'?\' characters, which
+-- would otherwise be expanded by 'query', 'formatQuery', or 'fmtSql'.
 --
 -- >>> S8.putStrLn $ quoteIdent "hello \"world\"!"
 -- "hello ""world""!"
