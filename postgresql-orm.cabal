@@ -36,6 +36,7 @@ library
                  , Data.RequireSelector
                  , Database.PostgreSQL.Devel
                  , Database.PostgreSQL.Describe
+                 , Database.PostgreSQL.Escape
                  , Database.PostgreSQL.Migration
                  , Database.PostgreSQL.ORM.Association
                  , Database.PostgreSQL.ORM.CreateTable
