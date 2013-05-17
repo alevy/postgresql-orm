@@ -172,7 +172,7 @@ copyByteToNibbles src dst = IO $ \rw0 ->
     (# rw1, w #) -> (# uncheckedWriteNibbles# dst w rw1, () #)
 
 buildByteA :: S.ByteString -> Builder
-buildByteA bs = mappend (fromByteString "'\\x") $
+buildByteA bs = mappend (fromByteString " E'\\\\x") $
   fromBuildStepCont $ \cont (BufRange (Ptr bb0) (Ptr be0)) ->
   S.unsafeUseAsCStringLen bs $ \(Ptr inptr0, I# inlen0) -> do
   let ine = plusAddr# inptr0 inlen0
