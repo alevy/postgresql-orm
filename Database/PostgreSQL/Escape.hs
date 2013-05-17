@@ -4,7 +4,7 @@
 {-# LANGUAGE UnboxedTuples #-}
 
 module Database.PostgreSQL.Escape (
-    fmtSql, quoteIdent
+    fmtSql, quoteIdent, Id(..)
   , buildSql, buildAction, buildLiteral, buildByteA, buildIdent
   ) where
 
@@ -14,9 +14,11 @@ import qualified Data.ByteString as S
 import qualified Data.ByteString.Internal as S
 import qualified Data.ByteString.Unsafe as S
 import Data.Monoid
+import Data.String
 import Database.PostgreSQL.Simple
 import Database.PostgreSQL.Simple.ToField
 import Database.PostgreSQL.Simple.ToRow
+import Database.PostgreSQL.Simple.Types
 import Foreign.Marshal.Alloc (mallocBytes)
 import Foreign.Storable (poke, pokeByteOff)
 import Foreign.Ptr
@@ -127,6 +129,17 @@ buildIdent ident
 quoteIdent :: S.ByteString -> S.ByteString
 quoteIdent = toByteString . buildIdent
           
+-- | An identifier is a column name.  When rendered into a SQL query
+-- by fmtSql, it will be double-quoted, rather than single-quoted.
+-- For example:
+--
+-- >>> fmtSql "select * from ? where name = ?" (Id "MyTable", "A Name")
+-- "select * from \"MyTable\" where name =  E'A Name'"
+newtype Id = Id S.ByteString deriving Show
+instance IsString Id where
+  fromString = Id . fromString
+instance ToField Id where
+  toField (Id name) = Plain $ buildIdent name
 
 hexNibblesPtr :: Ptr Word8
 {-# NOINLINE hexNibblesPtr #-}
@@ -203,8 +216,8 @@ buildAction (Many bs)        = mconcat $ map buildAction bs
 -- | A builder version of 'fmtSql', possibly useful if you are about
 -- to concatenate various individually formatted query fragments and
 -- want to save the work of concatenating each individually.
-buildSql :: (ToRow p) => S.ByteString -> p -> Builder
-buildSql template param =
+buildSql :: (ToRow p) => Query -> p -> Builder
+buildSql (Query template) param =
   intercatlate (split template) (map buildAction $ toRow param)
   where intercatlate (t:ts) (p:ps) = t <> p <> intercatlate ts ps
         intercatlate [t] []        = t
@@ -230,5 +243,5 @@ buildSql template param =
 -- @\"?'string'\"@, as these could get expanded to, e.g.,
 -- @\"\'param''string'\"@, which is a single string containing an
 -- apostrophe, when you probably wanted two strings.
-fmtSql :: (ToRow p) => S.ByteString -> p -> S.ByteString
-fmtSql template param = toByteString $ buildSql template param
+fmtSql :: (ToRow p) => Query -> p -> Query
+fmtSql template param = Query $ toByteString $ buildSql template param

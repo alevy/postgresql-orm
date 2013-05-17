@@ -14,8 +14,8 @@ module Database.PostgreSQL.ORM.Model (
     , DBRef, DBRefUnique, GDBRef(..), mkDBRef
     , As(..), fromAs, RowAlias(..)
       -- * Database operations on Models
-    , findRow, find, findWhere, findWhere_, findAll
-    , save, destroy, destroyByRef
+    , dbSelect, dbSelectP
+    , findRow, save, destroy, destroyByRef
       -- * Functions for accessing and using Models
     , modelName, primaryKey, modelSelectFragment
     , LookupRow(..), UpdateRow(..), InsertRow(..)
@@ -29,7 +29,6 @@ module Database.PostgreSQL.ORM.Model (
     , defaultModelLookupQuery, defaultModelUpdateQuery
     , defaultModelInsertQuery, defaultModelDeleteQuery
       -- * Helper functions and miscellaneous internals
-    , dbSelectModel
     , quoteIdent, NormalRef(..), UniqueRef(..)
     , GPrimaryKey0(..), GColumns(..), GDatatypeName(..)
     , printq
@@ -421,10 +420,10 @@ defaultModelIdentifiers mi = ModelIdentifiers {
         qcols = map qcol $ modelColumns mi
         pki = modelPrimaryColumn mi
 
-defaultModelDBSelect :: ModelIdentifiers a -> DBSelect (LookupRow a)
+defaultModelDBSelect :: ModelIdentifiers a -> DBSelect a
 defaultModelDBSelect mi = emptyDBSelect {
-    selFields = S.intercalate ", " $ modelQColumns mi
-  , selFrom = modelQTable mi
+    selFields = Query $ S.intercalate ", " $ modelQColumns mi
+  , selFrom = Query $ modelQTable mi
   }
 
 data ModelQueries a = ModelQueries {
@@ -580,7 +579,7 @@ class Model a where
   modelIdentifiers :: ModelIdentifiers a
   {-# INLINE modelIdentifiers #-}
   modelIdentifiers = defaultModelIdentifiers modelInfo
-  modelDBSelect :: DBSelect (LookupRow a)
+  modelDBSelect :: DBSelect a
   {-# INLINE modelDBSelect #-}
   modelDBSelect = defaultModelDBSelect modelIdentifiers
   modelQueries :: ModelQueries a
@@ -630,8 +629,7 @@ joinModelIdentifiers = r
         mib = modelIdentifiers `gAsTypeOf1_1` r
 
 joinModelDBSelect :: (Model a, Model b) =>
-                     DBSelect (LookupRow a) -> DBSelect (LookupRow b)
-                     -> DBSelect (LookupRow (a :. b))
+                     DBSelect a -> DBSelect b -> DBSelect (a :. b)
 joinModelDBSelect la lb = la {
       selFields = selFields la <> ", " <> selFields lb
     , selJoins = selJoins la ++
@@ -786,6 +784,24 @@ newtype UpdateRow a = UpdateRow a deriving (Show)
 instance (Model a) => ToRow (UpdateRow a) where
   toRow (UpdateRow a) = toRow $ InsertRow a :. Only (primaryKey a)
 
+-- | Run a 'DBSelect' query on parameters.  There number of \'?\'
+-- character embedeed in various fields of the 'DBSelect' must exactly
+-- match the number of fields in parameter type @p@.  Note the order
+-- of arguments is such that the 'DBSelect' can be pre-rendered and
+-- the parameter supplied later.  Hence, you should use this version
+-- when the 'DBSelect' is static.  For dynamically modified 'DBSelect'
+-- structures, you may prefer 'dbSelect'.
+dbSelectP :: (Model a, ToRow p) => DBSelect a -> Connection -> p -> IO [a]
+{-# INLINE dbSelectP #-}
+dbSelectP dbs = \c p -> map lookupRow <$> query c q p
+  where q = renderDBSelect dbs
+
+-- | Run a 'DBSelect' query and return the resulting models.
+dbSelect :: (Model a) => Connection -> DBSelect a -> IO [a]
+{-# INLINE dbSelect #-}
+dbSelect c dbs = map lookupRow <$> query_ c q
+  where q = renderDBSelect dbs
+
 -- | Follow a 'DBRef' or 'DBURef' and fetch the target row from the
 -- database into a 'Model' type @r@.
 findRow :: (Model r) => Connection -> GDBRef rt r -> IO (Maybe r)
@@ -794,34 +810,6 @@ findRow c k = action
         action = do rs <- query c (modelLookupQuery qs) (Only k)
                     case rs of [r] -> return $ Just $ lookupRow $ r
                                _   -> return Nothing
-
--- | An alias for 'findRow'.
-find :: (Model r) => Connection -> GDBRef rt r -> IO (Maybe r)
-{-# INLINE findRow #-}
-find = findRow
-
-dbSelectModel :: (Model a) => Connection -> DBSelect (LookupRow a) -> IO [a]
-dbSelectModel c dbs = map lookupRow <$> dbSelect c dbs
-
--- | Find models matching a SQL @WHERE@ predicate given by a query and
--- parameters.  For example, 'findAll' could have been defined as:
---
--- > {-# LANGUAGE OverloadedStrings #-}
--- >
--- > findAll :: (Model r) => Connection -> IO [r]
--- > findAll c = findWhere "TRUE" c ()
-findWhere :: (ToRow parms, Model r) => Query -> Connection -> parms -> IO [r]
-findWhere whereClause c parms =
-  dbSelectModel c $ addWhere whereClause parms modelDBSelect
-
--- | A variant of 'findWhere' that does not require query parameters.
-findWhere_ :: (Model r) => Query -> Connection -> IO [r]
-findWhere_ whereClause c = findWhere whereClause c ()
-
--- | Return an entire database table.
-findAll :: (Model r) => Connection -> IO [r]
-findAll c = dbSelectModel c modelDBSelect
-
 
 -- | Write a 'Model' to the database.  If the primary key is
 -- 'NullKey', the item is written with an @INSERT@ query, read back

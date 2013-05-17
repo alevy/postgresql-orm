@@ -84,7 +84,7 @@ instance ToRow TrivParam where
 -- functions in this file therefore create an @Association@ and its
 -- inverse simultaneously, returning them as a pair.
 data Association a b = Association {
-    assocSelect :: !(DBSelect (LookupRow b))
+    assocSelect :: !(DBSelect b)
     -- ^ General select returning all fields of @a@ from the join
     -- relation between @a@ and @b@.
   , assocQuery :: !Query
@@ -121,7 +121,7 @@ findBothAssociatedWhere :: (Model a, Model b, ToRow p) =>
                            -> IO [a :. b]
 findBothAssociatedWhere assoc wh c p = r
   where asel = (const $ modelDBSelect
-                :: (Model a) => IO [a :. b] -> DBSelect (LookupRow a)) r
+                :: (Model a) => IO [a :. b] -> DBSelect a) r
         insa = \sel -> sel {
           selFields = selFields asel <> ", " <> selFields sel }
         q = renderDBSelect $ insa $ addWhere wh () $ assocSelect assoc
@@ -240,7 +240,7 @@ defaultDBRefInfo = ri
           }
 
 mkJoin :: DBSelect a -> DBSelect b -> Query -> Query -> DBSelect a
-mkJoin dbsa dbsb (Query kw) (Query on) = dbsa {
+mkJoin dbsa dbsb kw on = dbsa {
     selJoins = selJoins dbsa ++ Join kw (selFrom dbsb) on : selJoins dbsb
     -- XXX maybe concatenate where clauses
   }
@@ -255,8 +255,8 @@ dbrefAssocs ri = (c_p, p_c)
         idc = modelIdentifiers `gAsTypeOf2` ri
         on = Query $ "ON " <> modelQPrimaryColumn idp
              <> " = " <> dbrefQColumn ri
-        psel = modelDBSelect `gAsTypeOf` (LookupRow $ undef1 ri)
-        csel = modelDBSelect `gAsTypeOf` (LookupRow $ undef2 ri)
+        psel = modelDBSelect `gAsTypeOf` (undef1 ri)
+        csel = modelDBSelect `gAsTypeOf` (undef2 ri)
         c_p = Association {
             assocSelect = mkJoin psel csel "JOIN" on
           , assocQuery = defaultModelLookupQuery idp
@@ -316,7 +316,7 @@ chainAssoc :: (Model a, Model b, Model c) =>
               Association a b -> Association b c -> Association a c
 chainAssoc ab bc =
   case splitLast $ selJoins $ assocSelect bc of
-    Just (js, Join kw b on) | b == modelQTable idb -> bc {
+    Just (js, Join kw b on) | fromQuery b == modelQTable idb -> bc {
         assocSelect = sel
       , assocQuery = renderDBSelect $ (assocSelect bc) {
           selJoins = js ++ [Join kw subquery on]
@@ -331,8 +331,8 @@ chainAssoc ab bc =
             }
   where idb = modelIdentifiers `gAsTypeOf1` ab
         ida = modelIdentifiers `gAsTypeOf2` ab
-        subquery = S.concat ["(", fromQuery $ assocQuery ab
-                            , ") AS ", modelQTable idb]
+        subquery = Query $ S.concat ["(", fromQuery $ assocQuery ab
+                                    , ") AS ", modelQTable idb]
         sel = (assocSelect bc) {
             selJoins = selJoins (assocSelect bc) ++ selJoins (assocSelect ab)
           }
@@ -397,9 +397,9 @@ jtAssoc jt = Association {
   }
   where ida = modelIdentifiers `gAsTypeOf2` jt
         idb = modelIdentifiers `gAsTypeOf1` jt
-        joins = [Join "JOIN" (jtQTable jt) $
+        joins = [Join "JOIN" (Query $ jtQTable jt) $ Query $
                  "ON " <> modelQPrimaryColumn idb <> " = " <> jtQColumnB jt
-                , Join "JOIN" (modelQTable ida) $
+                , Join "JOIN" (Query $ modelQTable ida) $ Query $
                   "ON " <> jtQColumnA jt <> " = " <> modelQPrimaryColumn ida]
         sel = selb { selJoins = selJoins selb ++ joins }
           where selb = modelDBSelect `asTypeOf` sel
