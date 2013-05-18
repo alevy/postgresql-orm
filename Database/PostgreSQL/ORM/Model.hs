@@ -14,7 +14,6 @@ module Database.PostgreSQL.ORM.Model (
     , DBRef, DBRefUnique, GDBRef(..), mkDBRef
     , As(..), fromAs, RowAlias(..)
       -- * Database operations on Models
-    , dbSelect, dbSelectP
     , findRow, save, destroy, destroyByRef
       -- * Functions for accessing and using Models
     , modelName, primaryKey, modelSelectFragment
@@ -24,7 +23,6 @@ module Database.PostgreSQL.ORM.Model (
     , defaultModelTable, defaultModelColumns, defaultModelGetPrimaryKey
     , defaultModelRead, defaultModelWrite
     , defaultModelIdentifiers
-    , defaultModelDBSelect
     , defaultModelQueries
     , defaultModelLookupQuery, defaultModelUpdateQuery
     , defaultModelInsertQuery, defaultModelDeleteQuery
@@ -57,7 +55,6 @@ import GHC.Generics
 import Data.AsTypeOf
 import Data.RequireSelector
 import Database.PostgreSQL.Escape (quoteIdent)
-import Database.PostgreSQL.ORM.DBSelect
 
 -- | A type large enough to hold database primary keys.  Do not use
 -- this type directly in your data structures.  Use 'DBKey' to hold a
@@ -420,12 +417,6 @@ defaultModelIdentifiers mi = ModelIdentifiers {
         qcols = map qcol $ modelColumns mi
         pki = modelPrimaryColumn mi
 
-defaultModelDBSelect :: ModelIdentifiers a -> DBSelect a
-defaultModelDBSelect mi = emptyDBSelect {
-    selFields = Query $ S.intercalate ", " $ modelQColumns mi
-  , selFrom = Query $ modelQTable mi
-  }
-
 data ModelQueries a = ModelQueries {
     modelLookupQuery :: !Query
     -- ^ A query template for looking up a model by its primary key.
@@ -579,9 +570,6 @@ class Model a where
   modelIdentifiers :: ModelIdentifiers a
   {-# INLINE modelIdentifiers #-}
   modelIdentifiers = defaultModelIdentifiers modelInfo
-  modelDBSelect :: DBSelect a
-  {-# INLINE modelDBSelect #-}
-  modelDBSelect = defaultModelDBSelect modelIdentifiers
   modelQueries :: ModelQueries a
   {-# INLINE modelQueries #-}
   modelQueries = defaultModelQueries modelIdentifiers
@@ -595,7 +583,6 @@ class Model a where
 instance (Model a, Model b) => Model (a :. b) where
   modelInfo = joinModelInfo
   modelIdentifiers = joinModelIdentifiers
-  modelDBSelect = joinModelDBSelect modelDBSelect modelDBSelect
   modelQueries = error "attempt to perform standard query on join relation"
 
 joinModelInfo :: (Model a, Model b) => ModelInfo (a :. b)
@@ -627,15 +614,6 @@ joinModelIdentifiers = r
           }
         mia = modelIdentifiers `gAsTypeOf1_2` r
         mib = modelIdentifiers `gAsTypeOf1_1` r
-
-joinModelDBSelect :: (Model a, Model b) =>
-                     DBSelect a -> DBSelect b -> DBSelect (a :. b)
-joinModelDBSelect la lb = la {
-      selFields = selFields la <> ", " <> selFields lb
-    , selJoins = selJoins la ++
-                 Join "CROSS JOIN" (selFrom lb) "" :
-                 selJoins lb
-  }
 
 class GUnitType f where
   gUnitTypeName :: f p -> String
@@ -783,24 +761,6 @@ instance (Model a) => ToRow (InsertRow a) where
 newtype UpdateRow a = UpdateRow a deriving (Show)
 instance (Model a) => ToRow (UpdateRow a) where
   toRow (UpdateRow a) = toRow $ InsertRow a :. Only (primaryKey a)
-
--- | Run a 'DBSelect' query on parameters.  There number of \'?\'
--- character embedeed in various fields of the 'DBSelect' must exactly
--- match the number of fields in parameter type @p@.  Note the order
--- of arguments is such that the 'DBSelect' can be pre-rendered and
--- the parameter supplied later.  Hence, you should use this version
--- when the 'DBSelect' is static.  For dynamically modified 'DBSelect'
--- structures, you may prefer 'dbSelect'.
-dbSelectP :: (Model a, ToRow p) => DBSelect a -> Connection -> p -> IO [a]
-{-# INLINE dbSelectP #-}
-dbSelectP dbs = \c p -> map lookupRow <$> query c q p
-  where q = renderDBSelect dbs
-
--- | Run a 'DBSelect' query and return the resulting models.
-dbSelect :: (Model a) => Connection -> DBSelect a -> IO [a]
-{-# INLINE dbSelect #-}
-dbSelect c dbs = map lookupRow <$> query_ c q
-  where q = renderDBSelect dbs
 
 -- | Follow a 'DBRef' or 'DBURef' and fetch the target row from the
 -- database into a 'Model' type @r@.

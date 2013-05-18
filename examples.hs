@@ -2,6 +2,7 @@
 
 import Control.Exception
 import Data.AsTypeOf
+import qualified Data.ByteString as S
 import Data.Int
 import Data.Maybe
 import Database.PostgreSQL.ORM.Association
@@ -76,6 +77,7 @@ bar' = Bar NullKey (Just 75) "bye" Nothing
 data X = X deriving (Generic)
 instance RowAlias X
 
+{-
 selfjoin :: IO [Bar :. As X Bar]
 selfjoin = bracket mkc close $ \c ->
   findWhere "bar.id = x.parent" c () :: IO [Bar :. As X Bar]
@@ -84,6 +86,7 @@ selfjoin' :: IO [(Bar,Bar)]
 selfjoin' = bracket mkc close $ \c ->
   map (\(b1 :. b2) -> (b1, fromAs X b2)) <$>
       findWhere "bar.bar_key = X.bar_parent" c ()
+-}
 
 getOne :: (Model a) => DBKeyType -> IO a
 getOne k = bracket mkc close $ \c ->

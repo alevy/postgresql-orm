@@ -7,18 +7,23 @@ module Database.PostgreSQL.ORM.DBSelect (
     Join(..), DBSelect(..), emptyDBSelect, renderDBSelect
   , addWhere, setOrderBy, setLimit, setOffset
   , buildDBSelect
+  , modelDBSelect
+  , dbSelectParams, dbSelect
   ) where
 
 import Blaze.ByteString.Builder
 import Blaze.ByteString.Builder.Char.Utf8 (fromChar)
 import qualified Data.ByteString as S
+import Data.Functor
 import Data.Monoid
 import Data.String
 import Database.PostgreSQL.Simple
 import Database.PostgreSQL.Simple.Types
 import GHC.Generics
 
+import Data.AsTypeOf
 import Database.PostgreSQL.Escape
+import Database.PostgreSQL.ORM.Model
 
 data Join = Join {
     joinKeyword :: !Query
@@ -117,3 +122,30 @@ setLimit i dbs = dbs { selLimit = fmtSql "LIMIT ?" (Only i) }
 
 setOffset :: DBSelect a -> Int -> DBSelect a
 setOffset dbs i = dbs { selOffset = fmtSql "OFFSET ?" (Only i) }
+
+modelDBSelect :: (Model a) => DBSelect a
+modelDBSelect = r
+  where mi = modelIdentifiers `gAsTypeOf1` r
+        r = emptyDBSelect {
+          selFields = Query $ S.intercalate ", " $ modelQColumns mi
+          , selFrom = Query $ modelQTable mi
+          }
+
+-- | Run a 'DBSelect' query on parameters.  There number of \'?\'
+-- character embedeed in various fields of the 'DBSelect' must exactly
+-- match the number of fields in parameter type @p@.  Note the order
+-- of arguments is such that the 'DBSelect' can be pre-rendered and
+-- the parameter supplied later.  Hence, you should use this version
+-- when the 'DBSelect' is static.  For dynamically modified 'DBSelect'
+-- structures, you may prefer 'dbSelect'.
+dbSelectParams :: (Model a, ToRow p) => DBSelect a -> Connection -> p -> IO [a]
+{-# INLINE dbSelectParams #-}
+dbSelectParams dbs = \c p -> map lookupRow <$> query c q p
+  where q = renderDBSelect dbs
+
+-- | Run a 'DBSelect' query and return the resulting models.
+dbSelect :: (Model a) => Connection -> DBSelect a -> IO [a]
+{-# INLINE dbSelect #-}
+dbSelect c dbs = map lookupRow <$> query_ c q
+  where q = renderDBSelect dbs
+
