@@ -21,8 +21,8 @@ module Database.PostgreSQL.ORM.Model (
       -- * Low-level functions providing manual access to defaults
     , defaultModelInfo
     , defaultModelTable, defaultModelColumns, defaultModelGetPrimaryKey
-    , defaultModelRead, defaultModelWrite
     , defaultModelIdentifiers
+    , defaultModelWrite
     , defaultModelQueries
     , defaultModelLookupQuery, defaultModelUpdateQuery
     , defaultModelInsertQuery, defaultModelDeleteQuery
@@ -158,10 +158,10 @@ mkDBRef a
   | otherwise = error $ "mkDBRef " ++ S8.unpack (modelName a) ++ ": NullKey"
 
 
--- | A @ModelInfo T@ contains all of the information necessary for
--- converting type @T@ to and from database rows.  Each @'Model'@ type
--- has a single @ModelInfo@ associated with it, accessible through the
--- 'modelInfo' method.
+-- | A @ModelInfo T@ contains the information necessary for mapping
+-- @T@ to a database table.  Each @'Model'@ type has a single
+-- @ModelInfo@ associated with it, accessible through the 'modelInfo'
+-- method.
 data ModelInfo a = ModelInfo {
     modelTable :: !S.ByteString
     -- ^ The name of the database table corresponding to this model.
@@ -187,23 +187,12 @@ data ModelInfo a = ModelInfo {
     -- you customize this field, you must also customize
     -- 'modelPrimaryColumn'--no check is made that the two are
     -- consistent.
-  , modelRead :: !(RowParser a)
-    -- ^ Parse a database row corresponding to the model.
-  , modelWrite :: !(a -> [Action])
-    -- ^ Format all fields except the primary key for writing the
-    -- model to the database.
-  , modelIsTable :: !Bool
-    -- ^ True when the model corresponds to a simple table, as opposed
-    -- to a join.  When 'False', it is not safe to compute
-    -- 'ModelIdentifiers' in a standard way from this @ModelInfo@,
-    -- because, for instance, different columns might need to be
-    -- qualified by different table names.
   }
 
 instance Show (ModelInfo a) where
-  show a = intercalate " " ["Model", show $ modelTable a
-                           , show $ modelColumns a, show $ modelPrimaryColumn a
-                           , "???", show $ modelIsTable a]
+  show a = intercalate " " [
+      "Model", show $ modelTable a, show $ modelColumns a
+    , show $ modelPrimaryColumn a , "?"]
 
 class GDatatypeName f where
   gDatatypeName :: f p -> String
@@ -306,15 +295,12 @@ deleteAt _ _     = []
 -- written to a database.  Every field must be an instance of
 -- 'ToField'.
 
--- The fist argument is the 0-based index of the primary key (which
--- should almost always be 0).  If for some reason you don't want to
--- skip the primary key, use 'defaultToRow' to marshall the full row,
--- but that probably isn't what you want.
-defaultModelWrite :: (Generic a, GToRow (Rep a)) =>
-                     Int        -- ^ Field number of the primary key
-                     -> a       -- ^ Model to write
-                     -> [Action] -- ^ Writes all fields except primary key
-defaultModelWrite pki = deleteAt pki . defaultToRow
+-- | Marshals all fields of a model /except/ the primary key (which is
+-- simply skipped).
+defaultModelWrite :: (Model a, Generic a, GToRow (Rep a)) => a -> [Action]
+{-# INLINE defaultModelWrite #-}
+defaultModelWrite a = deleteAt pki $ defaultToRow a
+  where pki = modelPrimaryColumn $ modelInfo `gAsTypeOf` a
 
 -- | The default definition of 'modelInfo'.  See the documentation at
 -- 'Model' for more information.
@@ -325,20 +311,15 @@ defaultModelWrite pki = deleteAt pki . defaultToRow
 -- The default for 'modelPrimaryColumn' is 0.  If you overwrite that,
 -- you will need to overwrite 'modelGetPrimaryKey' as well (and likely
 -- vice versa).
-defaultModelInfo :: (Generic a, GToRow (Rep a), GFromRow (Rep a)
-                    , GPrimaryKey0 (Rep a), GColumns (Rep a)
-                    , GDatatypeName (Rep a)) => ModelInfo a
+defaultModelInfo :: (Generic a, GDatatypeName (Rep a), GColumns (Rep a)
+                    , GPrimaryKey0 (Rep a)) => ModelInfo a
 defaultModelInfo = m
   where m = ModelInfo { modelTable = defaultModelTable a
                       , modelColumns = defaultModelColumns a
-                      , modelPrimaryColumn = pki
+                      , modelPrimaryColumn = 0
                       , modelGetPrimaryKey = defaultModelGetPrimaryKey
-                      , modelRead = defaultModelRead
-                      , modelWrite = defaultModelWrite pki
-                      , modelIsTable = True
                       }
         a = undef1 m
-        pki = 0
 
 -- | An alternate 'Model' pattern in which Haskell type and field
 -- names are converted from camel-case to underscore notation.  The
@@ -398,9 +379,10 @@ data ModelIdentifiers a = ModelIdentifiers {
   , modelQPrimaryColumn :: S.ByteString
     -- ^ Literal SQL for the model's primary key column.
   , modelQWriteColumns :: [S.ByteString]
-    -- ^ Literal SQL for all the (non-table-qualified) columns except
-    -- the primary key.  These are the columns that should be included
-    -- in an @INSERT@ or @UPDATE@.
+    -- ^ Literal SQL for all the columns except the primary key.
+    -- These are the columns that should be included in an @INSERT@ or
+    -- @UPDATE@.  Note that unlike the other fields, these column
+    -- names should /not/ be table-qualified.
   } deriving (Show)
 
 -- | The default simply quotes the 'modelInfo' and 'modelColumns'
@@ -562,46 +544,44 @@ defaultModelQueries mi = ModelQueries {
 -- 'defaultModelColumns', 'defaultModelGetPrimaryKey', etc.).
 class Model a where
   modelInfo :: ModelInfo a
-  default modelInfo :: (Generic a, GToRow (Rep a), GFromRow (Rep a)
-                       , GPrimaryKey0 (Rep a), GColumns (Rep a)
-                       , GDatatypeName (Rep a)) => ModelInfo a
+  default modelInfo :: (Generic a, GDatatypeName (Rep a), GColumns (Rep a)
+                       , GPrimaryKey0 (Rep a)) => ModelInfo a
   {-# INLINE modelInfo #-}
   modelInfo = defaultModelInfo
+
   modelIdentifiers :: ModelIdentifiers a
   {-# INLINE modelIdentifiers #-}
   modelIdentifiers = defaultModelIdentifiers modelInfo
+
+  -- | Note that if @a@ an instance of 'FromRow', a fine definition of
+  -- this is @modelRead = fromRow@.  The default is to construct a row
+  -- parser using the 'Generic' class.  However, it is crucial that
+  -- the columns be parsed in the same order they are listed in the
+  -- 'modelColumns' field of @a@'s 'ModelInfo' structure.
+  modelRead :: RowParser a
+  default modelRead :: (Generic a, GFromRow (Rep a)) => RowParser a
+  {-# INLINE modelRead #-}
+  modelRead = defaultFromRow
+
+  -- | Marshal all fields of @a@ /except/ the primary key.  As with
+  -- 'modelRead', the fields must be marshaled the the same order the
+  -- corresponding columns are listed in 'modelColumns', only with the
+  -- primary key (generally column 0) deleted.
+  --
+  -- Do /not/ define this as 'toRow', even if @a@ is an instance of
+  -- 'ToRow', because 'toRow' would include the primary key.
+  -- Similarly, do /not/ define this as 'defaultToRow'.  On the other
+  -- hand, it is reasonable for @modelWrite@ to return an error for
+  -- degenerate models (such as joins) that should never be written.
+  modelWrite :: a -> [Action]
+  default modelWrite :: (Generic a, GToRow (Rep a)) => a -> [Action]
+  {-# INLINE modelWrite #-}
+  modelWrite = defaultModelWrite
+
   modelQueries :: ModelQueries a
   {-# INLINE modelQueries #-}
   modelQueries = defaultModelQueries modelIdentifiers
 
--- | A degenerate instance of model representing a database join.  The
--- ':.' instance only allows limited queries such as 'findWhere' and
--- 'findAll'.  In particular, there is no primary key and no ability
--- to 'save' or 'destroy' such a join.  Attempts to use such functions
--- (including 'findRow', which requires a primary key) will result in
--- an error.
-instance (Model a, Model b) => Model (a :. b) where
-  modelInfo = joinModelInfo
-  modelIdentifiers = joinModelIdentifiers
-  modelQueries = error "attempt to perform standard query on join relation"
-
-joinModelInfo :: (Model a, Model b) => ModelInfo (a :. b)
-joinModelInfo = r
-  where r = ModelInfo {
-            modelTable = jname
-          , modelColumns = modelColumns mia ++ modelColumns mib
-          , modelPrimaryColumn = -1
-          , modelGetPrimaryKey = const err
-          , modelRead = (:.) <$> modelRead mia <*> modelRead mib
-          , modelWrite = const err
-          , modelIsTable = False
-          }
-        (mia, mib) = (const (modelInfo, modelInfo)
-                      :: (Model a, Model b) => ModelInfo (a :. b)
-                         -> (ModelInfo a, ModelInfo b)) r
-        jname = modelTable mia <> " :. " <> modelTable mib
-        err :: a
-        err = error $ "illegal use of join relation " ++ S8.unpack jname
 
 joinModelIdentifiers :: (Model a, Model b) => ModelIdentifiers (a :. b)
 joinModelIdentifiers = r
@@ -614,6 +594,20 @@ joinModelIdentifiers = r
           }
         mia = modelIdentifiers `gAsTypeOf1_2` r
         mib = modelIdentifiers `gAsTypeOf1_1` r
+
+-- | A degenerate instance of model representing a database join.  The
+-- ':.' instance only allows limited queries such as 'findWhere' and
+-- 'findAll'.  In particular, there is no primary key and no ability
+-- to 'save' or 'destroy' such a join.  Attempts to use such functions
+-- (including 'findRow', which requires a primary key) will result in
+-- an error.
+instance (Model a, Model b) => Model (a :. b) where
+  modelInfo = error "attempt to access ModelInfo of join type :."
+  modelIdentifiers = joinModelIdentifiers
+  modelRead = (:.) <$> modelRead <*> modelRead
+  modelWrite _ = error "attempt to write join type :. as a normal Model"
+  modelQueries = error "attempt to perform standard query on join type :."
+
 
 class GUnitType f where
   gUnitTypeName :: f p -> String
@@ -689,16 +683,6 @@ newtype As alias row = As { unAs :: row } deriving (Show)
 fromAs :: alias -> As alias row -> row
 fromAs _ (As row) = row
 
-aliasModelInfo :: ModelInfo a -> ModelInfo (As alias a)
-aliasModelInfo inner
-  | not (modelIsTable inner) =
-    error "As constructor must be applied to simple tables"
-  | otherwise = inner {
-      modelGetPrimaryKey = \(As a) -> modelGetPrimaryKey inner a
-    , modelRead = As <$> modelRead inner
-    , modelWrite = const $ error "illegal attempt to write alias as model"
-    }
-
 aliasModelIdentifiers :: (RowAlias alias) => ModelInfo (As alias a)
                          -> ModelIdentifiers (As alias a)
 aliasModelIdentifiers mi = ModelIdentifiers {
@@ -718,8 +702,10 @@ aliasModelIdentifiers mi = ModelIdentifiers {
 -- itself.  Hence, standard operations ('findRow', 'save', 'destroy')
 -- are not allowed on 'As' models.
 instance (Model a, RowAlias as) => Model (As as a) where
-  {-# INLINE modelInfo #-}
-  modelInfo = aliasModelInfo modelInfo
+  modelInfo = error "attempt to access \"As\" alias as noral Model"
+  {-# INLINE modelRead #-}
+  modelRead = As <$> modelRead
+  modelWrite = error "attempt to write \"As\" alias as noral Model"
   {-# INLINE modelIdentifiers #-}
   modelIdentifiers = aliasModelIdentifiers modelInfo
   modelQueries = error "attempt to perform standard query on AS table alias"
@@ -747,13 +733,13 @@ modelSelectFragment mi = S.concat [
 -- to used as the result of a database query.
 newtype LookupRow a = LookupRow { lookupRow :: a } deriving (Show)
 instance (Model a) => FromRow (LookupRow a) where
-  fromRow = LookupRow <$> modelRead modelInfo
+  fromRow = LookupRow <$> modelRead
 
 -- | A newtype wrapper in the 'ToRow' class, which marshalls every
 -- field except the primary key.  For use with 'modelInsertQuery'.
 newtype InsertRow a = InsertRow a deriving (Show)
 instance (Model a) => ToRow (InsertRow a) where
-  toRow (InsertRow a) = modelWrite modelInfo a
+  toRow (InsertRow a) = modelWrite a
 
 -- | A newtype wrapper in the 'ToRow' class, which marshalls every
 -- field except the primary key, followed by the primary key.  For use
