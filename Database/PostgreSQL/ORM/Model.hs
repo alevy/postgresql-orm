@@ -724,7 +724,12 @@ class RowAlias a where
 --    r <- 'dbSelect' c $ addWhere \"bar.bar_key = x.bar_parent\" modelDBSelect
 --         :: IO [Bar :. As X Bar]
 -- @
-newtype As alias row = As { unAs :: row } deriving (Show)
+newtype As alias row = As { unAs :: row }
+instance (RowAlias alias, Show row) => Show (As alias row) where
+  showsPrec d as@(As row) = showParen (d > 10) $ \rest ->
+    "As " ++ S8.unpack (rowAliasName as) ++
+    " (" ++ showsPrec 11 row (")" ++ rest)
+
 
 -- | @fromAs@ extracts the @row@ from an @'As' alias row@, but
 -- constrains the type of @alias@ to be the same as its first argument
@@ -740,17 +745,18 @@ newtype As alias row = As { unAs :: row } deriving (Show)
 fromAs :: alias -> As alias row -> row
 fromAs _ (As row) = row
 
-aliasModelIdentifiers :: (RowAlias alias) => ModelInfo (As alias a)
+aliasModelIdentifiers :: (RowAlias alias) => ModelInfo a
                          -> ModelIdentifiers (As alias a)
-aliasModelIdentifiers mi = ModelIdentifiers {
-    modelQTable = S.concat [qtable, " AS ", alias]
-  , modelQColumns = qcols
-  , modelQPrimaryColumn = qcols !! pki
-  , modelQWriteColumns = deleteAt pki qcols
-  , modelQualifier = Just alias
-  }
-  where qtable = quoteIdent (modelTable mi)
-        alias = quoteIdent $ rowAliasName $ undef1 mi
+aliasModelIdentifiers mi = r
+  where r = ModelIdentifiers {
+            modelQTable = S.concat [qtable, " AS ", alias]
+          , modelQColumns = qcols
+          , modelQPrimaryColumn = qcols !! pki
+          , modelQWriteColumns = deleteAt pki qcols
+          , modelQualifier = Just alias
+          }
+        qtable = quoteIdent (modelTable mi)
+        alias = quoteIdent $ rowAliasName $ undef1 r
         qcol c = S.concat [alias, ".", quoteIdent c]
         qcols = map qcol $ modelColumns mi
         pki = modelPrimaryColumn mi
@@ -767,21 +773,6 @@ instance (Model a, RowAlias as) => Model (As as a) where
   {-# INLINE modelIdentifiers #-}
   modelIdentifiers = aliasModelIdentifiers modelInfo
   modelQueries = error "attempt to perform standard query on AS table alias"
-
-
--- | A degenerate model that can be joined to other models with ':.'
--- with no effect on the resulting SQL queries rendered.
-instance Model () where
-  modelInfo = error "attempt to use () as Model"
-  modelIdentifiers = ModelIdentifiers {
-      modelQTable = ""
-    , modelQColumns = []
-    , modelQPrimaryColumn = error err
-    , modelQWriteColumns = error err
-    , modelQualifier = Just ""
-    }
-    where err = error "attempt to use () as Model"
-  modelRead = pure ()
 
 
 -- | Lookup the 'modelTable' of a 'Model' (@modelName = 'modelTable'

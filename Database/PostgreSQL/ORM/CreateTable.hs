@@ -63,7 +63,6 @@ customModelCreateStatement except constraints a
 modelCreateStatement :: (Model a, Generic a, GDefTypes (Rep a)) => a -> Query
 modelCreateStatement a = customModelCreateStatement [] [] a
 
-{-
 -- | Create the database table corresponding to a 'JoinTable'.
 jtCreateStatement :: (Model a, Model b) => JoinTable a b -> Query
 jtCreateStatement jt = Query $ S.concat [
@@ -77,5 +76,3 @@ jtCreateStatement jt = Query $ S.concat [
         refb = (undefined :: JoinTable a b -> DBRef b) jt
         typa = ida <> " " <> sqlBaseType refa <> " ON DELETE CASCADE NOT NULL"
         typb = idb <> " " <> sqlBaseType refb <> " ON DELETE CASCADE NOT NULL"
-
--}

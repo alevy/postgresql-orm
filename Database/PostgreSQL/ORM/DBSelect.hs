@@ -22,6 +22,7 @@ module Database.PostgreSQL.ORM.DBSelect (
 import Blaze.ByteString.Builder
 import Blaze.ByteString.Builder.Char.Utf8 (fromChar)
 import qualified Data.ByteString as S
+import qualified Data.ByteString.Char8 as S8
 import Data.Functor
 import Data.Monoid
 import Data.String
@@ -61,7 +62,10 @@ data DBSelect a = DBSelect {
   , selOrderBy :: !Query
   , selLimit :: !Query
   , selOffset :: !Query
-  } deriving (Show, Generic)
+  } deriving (Generic)
+
+instance Show (DBSelect a) where
+  show = S8.unpack . fromQuery . renderDBSelect
 
 space :: Builder
 space = fromChar ' '
@@ -110,7 +114,8 @@ buildDBSelect :: DBSelect a -> Builder
 buildDBSelect dbs = gdbsQuery $ from dbs
 
 renderDBSelect :: DBSelect a -> Query
-renderDBSelect = Query . toByteString . buildDBSelect
+renderDBSelect = Query . S.tail . toByteString . buildDBSelect
+-- S.tail is because the rendering inserts an extra space at the beginning
 
 catQueries :: Query -> Query -> Query -> Query
 catQueries left delim right
@@ -205,6 +210,7 @@ dbJoinModels kw on = dbJoin modelDBSelect kw modelDBSelect on
 -- this is the case.  If you @dbProject@ a type that doesn't make
 -- sense, you will get a runtime error from a failed database query.
 dbProject :: (Model a) => DBSelect something_containing_a -> DBSelect a
+{-# INLINE dbProject #-}
 dbProject dbs = r
   where sela = modelDBSelect `gAsTypeOf1` r
         r = dbs { selFields = selFields sela }
