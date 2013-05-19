@@ -4,7 +4,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeOperators #-}
 
-module Database.PostgreSQL.ORM.Association (
+module Database.PostgreSQL.ORM.Association {-(
     Association(..)
   , dbJoin, dbProject
   , findAssociated, findAssociatedWhere, findBothAssociatedWhere
@@ -20,13 +20,15 @@ module Database.PostgreSQL.ORM.Association (
   , TrivParam(..)
   , jtFlip, jtAssoc
   , dumpAssoc
-  ) where
+  )-} where
 
+import Control.Applicative
 import qualified Data.ByteString as S
 import Data.Functor
 import Data.List
 import Data.Monoid
 import Database.PostgreSQL.Simple
+import Database.PostgreSQL.Simple.FromRow
 import Database.PostgreSQL.Simple.ToField
 import Database.PostgreSQL.Simple.ToRow
 import Database.PostgreSQL.Simple.Types
@@ -35,6 +37,39 @@ import Data.AsTypeOf
 import Data.GetField
 import Database.PostgreSQL.ORM.DBSelect
 import Database.PostgreSQL.ORM.Model
+
+
+data JoinTable a b = JoinTable { refA :: !(DBRef a)
+                               , refB :: !(DBRef b)
+                               } deriving (Show)
+
+joinTableIdentifiers :: ModelInfo a -> ModelInfo b
+                        -> ModelIdentifiers (JoinTable a b)
+joinTableIdentifiers mia mib = ModelIdentifiers {
+    modelQTable = name
+  , modelQColumns = [colA, colB]
+  , modelQPrimaryColumn = error "No primary column in JoinTable"
+  , modelQWriteColumns = error "update Join table through dedicated functions"
+  , modelQualifier = Just name
+  }
+  where err = error "update Join table through dedicated functions"
+        compound x y = quoteIdent $ S.concat [x, "_", y]
+        name = quoteIdent $ S.intercalate "_" [modelTable mia, modelTable mib]
+        colA = S.concat [name, ".", compound (modelTable mia)
+                         (modelColumns mia !! modelPrimaryColumn mia)]
+        colB = S.concat [name, ".", compound (modelTable mib)
+                         (modelColumns mib !! modelPrimaryColumn mib)]
+
+instance (Model a, Model b) => Model (JoinTable a b) where
+  modelInfo = error "attempt to use Join table as normal model"
+  modelIdentifiers = joinTableIdentifiers modelInfo modelInfo
+  modelRead = JoinTable <$> field <*> field
+  modelWrite = error "update Join table through dedicated functions"
+  
+instance ToRow (JoinTable a b) where
+  toRow jt = [toField $ refA jt, toField $ refB $ jt]
+
+{-
 
 -- | A trivial 'ToRow' instance that can be passed to 'query'.  This
 -- structure is useful when you want to build up parameters piecemeal
@@ -477,3 +512,5 @@ dumpAssoc :: Association a b -> IO ()
 dumpAssoc a = do
   printq $ renderDBSelect $ assocSelect a
   printq $ assocQuery a
+
+-}
