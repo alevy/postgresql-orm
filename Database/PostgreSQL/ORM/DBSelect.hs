@@ -12,10 +12,11 @@ module Database.PostgreSQL.ORM.DBSelect (
     -- * Creating DBSelects
   , emptyDBSelect
   , modelDBSelect
-  , dbJoin, dbJoinModels, dbChain
+  , dbJoin, dbJoinModels
   , dbProject, dbProject'
+  , dbNest, dbChain
     -- * Altering DBSelects
-  , addWhere, setOrderBy, setLimit, setOffset
+  , addWhere_, addWhere, setOrderBy, setLimit, setOffset
   ) where
 
 import Blaze.ByteString.Builder
@@ -32,8 +33,13 @@ import Data.AsTypeOf
 import Database.PostgreSQL.Escape
 import Database.PostgreSQL.ORM.Model
 
-data FromClause = FromModel !Query
-                | FromJoin !FromClause !Query !FromClause !Query
+data FromClause = FromModel { fcVerbatim :: !Query
+                            , fcCanonical :: !S.ByteString }
+                | FromJoin { fcLeft :: !FromClause
+                           , fcJoinOp :: !Query
+                           , fcRight :: !FromClause
+                           , fcOnClause :: !Query
+                           , fcCanonical :: !S.ByteString }
                   deriving Show
 
 -- | A deconstructed SQL select statement.
@@ -70,10 +76,10 @@ toQuery :: Builder -> Query
 toQuery = Query . toByteString
 
 buildFromClause :: FromClause -> Builder
-buildFromClause (FromModel q) | qNull q = mempty
+buildFromClause (FromModel q _) | qNull q = mempty
 buildFromClause cl0 = fromByteString " FROM " <> go cl0
-  where go (FromModel q) = qBuilder q
-        go (FromJoin left joinkw right onClause) = mconcat [
+  where go (FromModel q _) = qBuilder q
+        go (FromJoin left joinkw right onClause _) = mconcat [
             fromChar '(', go left, space, qBuilder joinkw, space, go right
           , if qNull onClause then mempty else space <> qBuilder onClause
           , fromChar ')' ]
@@ -86,7 +92,7 @@ instance GDBS (K1 i Query) where
   gdbsQuery (K1 q) | qNull q = mempty
                    | otherwise = space <> qBuilder q
 instance GDBS (K1 i FromClause) where
-  gdbsDefault = K1 (FromModel $ Query S.empty)
+  gdbsDefault = K1 (FromModel "" "")
   gdbsQuery (K1 fc) = buildFromClause fc
 instance (GDBS a, GDBS b) => GDBS (a :*: b) where
   gdbsDefault = gdbsDefault :*: gdbsDefault
@@ -105,6 +111,18 @@ buildDBSelect dbs = gdbsQuery $ from dbs
 
 renderDBSelect :: DBSelect a -> Query
 renderDBSelect = Query . toByteString . buildDBSelect
+
+catQueries :: Query -> Query -> Query -> Query
+catQueries left delim right
+  | qNull left  = right
+  | qNull right = left
+  | otherwise   = Query $ S.concat $ map fromQuery [left, delim, right]
+
+addWhere_ :: Query -> DBSelect a -> DBSelect a
+addWhere_ q dbs
+  | qNull q = dbs
+  | otherwise = dbs { selWhereKeyword = "WHERE"
+                    , selWhere = catQueries (selWhere dbs) " AND " q }
 
 addWhere :: (ToRow p) => Query -> p -> DBSelect a -> DBSelect a
 addWhere q p dbs
@@ -133,7 +151,7 @@ modelDBSelect = r
   where mi = modelIdentifiers `gAsTypeOf1` r
         r = emptyDBSelect {
           selFields = Query $ S.intercalate ", " $ modelQColumns mi
-          , selFrom = FromModel $ Query $ modelQTable mi
+          , selFrom = FromModel (Query $ modelQTable mi) (modelQTable mi)
           }
 
 -- | Run a 'DBSelect' query on parameters.  There number of \'?\'
@@ -158,23 +176,20 @@ dbSelect c dbs = map lookupRow <$> query_ c q
 -- 'selWhere' clauses of two 'DBSelect' queries.  Other fields are
 -- simply taken from the first 'DBSelect', meaning the values in the
 -- second table are ignored.
-dbJoin :: DBSelect a      -- ^ First table
+dbJoin :: (Model a, Model b) =>
+          DBSelect a      -- ^ First table
           -> Query        -- ^ Join keyword (@\"JOIN\"@, @\"LEFT JOIN\"@, etc.)
           -> DBSelect b   -- ^ Second table
           -> Query  -- ^ Predicate (if any) including @ON@ or @USING@ keyword
           -> DBSelect (a :. b)
-dbJoin left joinOp right onClause = left {
+dbJoin left joinOp right onClause = addWhere_ (selWhere right) left {
     selFields = Query $ S.concat [fromQuery $ selFields left, ", ",
                                   fromQuery $ selFields right]
   , selFrom = FromJoin (selFrom left) joinOp (selFrom right) onClause
-  , selWhereKeyword = Query $ if S.null whereClause then S.empty else "WHERE"
-  , selWhere = Query whereClause
+              (modelQTable idab)
   }
-  where wl = fromQuery $ selWhere left
-        wr = fromQuery $ selWhere right
-        whereClause | S.null wl = wr
-                    | S.null wr = wl
-                    | otherwise = S.concat [wl, " AND ", wr]
+  where idab = modelIdentifiers `gAsTypeOf`
+               (undefined :: g a -> g b -> a :. b) left right
 
 -- | A version of 'dbJoin' that uses 'modelDBSelect' for the joined
 -- tables.
@@ -202,14 +217,35 @@ dbProject' dbs = r
   where sela = modelDBSelect `gAsTypeOf1` r
         ida = modelIdentifiers `gAsTypeOf1` r
         Just mq = modelQualifier ida
-        q = Query $ toByteString $ fromChar '(' <>
+        q = toQuery $ fromChar '(' <>
             buildDBSelect dbs { selFields = selFields sela } <>
             fromByteString ") AS " <> fromByteString mq
-        r = sela { selFrom = FromModel q }
+        r = sela { selFrom = FromModel q $ modelQTable ida }
 
-dbChain :: (Model a) =>
-           DBSelect (a :. b) -> DBSelect (b :. c) -> DBSelect (a :. b :. c)
-dbChain left right
-  | FromJoin (FromModel b) kw c onclause <- selFrom right =
-    dbJoin (dbProject left) kw right{ selFrom = c } onclause
-  | otherwise = error "dbChain: bad right-hand side"
+mergeFromClauses :: S.ByteString -> FromClause -> FromClause -> FromClause
+mergeFromClauses canon left right =
+  case go left of
+    (fc, 1) -> fc
+    (_, 0)  -> error $ "mergeFromClauses could not find " ++ show canon
+    (_, _)  -> error $ "mergeFromClauses found duplicate " ++ show canon
+  where go fc | fcCanonical fc == canon = (right, 1 :: Int)
+        go (FromJoin l op r on ffc) =
+          case (go l, go r) of
+            ((lfc, ln), (rfc, rn)) -> (FromJoin lfc op rfc on ffc, ln + rn)
+        go fc = (fc, 0)
+
+dbNest :: (Model a, Model b) =>
+          DBSelect (a :. b) -> DBSelect (b :. c) -> DBSelect (a :. b :. c)
+dbNest left right = addWhere_ (selWhere right) left {
+    selFields = fields
+  , selFrom = mergeFromClauses nameb (selFrom left) (selFrom right)
+  }
+  where nameb = modelQTable $ modelIdentifiers `gAsTypeOf1_1` left
+        acols = modelQColumns $ modelIdentifiers `gAsTypeOf1_2` left
+        colcomma c r = fromByteString c <> fromByteString ", " <> r
+        fields = toQuery $ foldr colcomma (qBuilder $ selFields right)
+                 acols
+
+dbChain :: (Model a, Model b, Model c) =>
+           DBSelect (a :. b) -> DBSelect (b :. c) -> DBSelect (a :. c)
+dbChain left right = dbProject $ dbNest left right
