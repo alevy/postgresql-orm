@@ -114,6 +114,7 @@ data Comment = Comment {
   } deriving (Show, Generic)
 instance Model Comment where modelInfo = underscoreModelInfo "comment"
 
+{-
 
 author_posts :: Association Author Post
 post_author :: Association Post Author
@@ -130,6 +131,7 @@ comment_author = chainAssoc comment_post post_author
 
 author_comments :: Association Author Comment
 author_comments =  chainAssoc author_posts post_comments
+-}
 
 {-
 junk = do

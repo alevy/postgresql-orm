@@ -637,13 +637,17 @@ class Model a where
 joinModelIdentifiers :: (Model a, Model b) => ModelIdentifiers (a :. b)
 joinModelIdentifiers = r
   where r = ModelIdentifiers {
-              modelQTable = modelQTable mia <> " CROSS JOIN " <> modelQTable mib
+              modelQTable = qtable
             , modelQColumns = modelQColumns mia ++ modelQColumns mib
             , modelQWriteColumns = error "attempt to write join relation"
             , modelQPrimaryColumn =
               error "attempt to use primary key of join relation"
             , modelQualifier = Nothing
           }
+        qtable | S.null $ modelQTable mib = modelQTable mia
+               | S.null $ modelQTable mia = modelQTable mib
+               | otherwise = S.concat [modelQTable mia, " CROSS JOIN "
+                                      , modelQTable mib]
         mia = modelIdentifiers `gAsTypeOf1_2` r
         mib = modelIdentifiers `gAsTypeOf1_1` r
 
@@ -763,6 +767,21 @@ instance (Model a, RowAlias as) => Model (As as a) where
   {-# INLINE modelIdentifiers #-}
   modelIdentifiers = aliasModelIdentifiers modelInfo
   modelQueries = error "attempt to perform standard query on AS table alias"
+
+
+-- | A degenerate model that can be joined to other models with ':.'
+-- with no effect on the resulting SQL queries rendered.
+instance Model () where
+  modelInfo = error "attempt to use () as Model"
+  modelIdentifiers = ModelIdentifiers {
+      modelQTable = ""
+    , modelQColumns = []
+    , modelQPrimaryColumn = error err
+    , modelQWriteColumns = error err
+    , modelQualifier = Just ""
+    }
+    where err = error "attempt to use () as Model"
+  modelRead = pure ()
 
 
 -- | Lookup the 'modelTable' of a 'Model' (@modelName = 'modelTable'
