@@ -413,6 +413,17 @@ data ModelIdentifiers a = ModelIdentifiers {
     -- These are the columns that should be included in an @INSERT@ or
     -- @UPDATE@.  Note that unlike the other fields, these column
     -- names should /not/ be table-qualified.
+  , modelQualifier :: !(Maybe S.ByteString)
+    -- ^ When all columns in 'modelQColumns' are qualified by the same
+    -- table name, this field contains 'Just' the table name.
+    -- For the ':.' type (in which different columns have different
+    -- table qualifications), this field is 'Nothing'.
+    --
+    -- For normal models, this field will be identical to
+    -- 'modelQTable'.  However, for 'As' models, 'modelQTable' will
+    -- contain unquoted SQL such as @\"\\\"MyType\\\" AS
+    -- \\\"my_alias\\\"\"@, in which case @modelQualifier@ will
+    -- contain @'Just' \"\\\"my_alias\\\"\"@.
   } deriving (Show)
 
 -- | The default simply quotes the 'modelInfo' and 'modelColumns'
@@ -423,6 +434,7 @@ defaultModelIdentifiers mi = ModelIdentifiers {
   , modelQColumns = qcols
   , modelQPrimaryColumn = qcols !! pki
   , modelQWriteColumns = deleteAt pki $ map quoteIdent $ modelColumns mi
+  , modelQualifier = Just qtable
   }
   where qtable = quoteIdent (modelTable mi)
         qcol c = S.concat [qtable, ".", quoteIdent c]
@@ -630,6 +642,7 @@ joinModelIdentifiers = r
             , modelQWriteColumns = error "attempt to write join relation"
             , modelQPrimaryColumn =
               error "attempt to use primary key of join relation"
+            , modelQualifier = Nothing
           }
         mia = modelIdentifiers `gAsTypeOf1_2` r
         mib = modelIdentifiers `gAsTypeOf1_1` r
@@ -730,6 +743,7 @@ aliasModelIdentifiers mi = ModelIdentifiers {
   , modelQColumns = qcols
   , modelQPrimaryColumn = qcols !! pki
   , modelQWriteColumns = deleteAt pki qcols
+  , modelQualifier = Just alias
   }
   where qtable = quoteIdent (modelTable mi)
         alias = quoteIdent $ rowAliasName $ undef1 mi

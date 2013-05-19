@@ -50,7 +50,7 @@ data DBSelect a = DBSelect {
     -- ^ By default @\"SELECT\"@, but might usefully be set to
     -- something else such as @\"SELECT DISTINCT\"@ in some
     -- situations.
-  , selFields :: !Query
+  , selFields :: Query
   , selFromKeyword :: !Query
     -- ^ By default @\"FROM\"@, but could be set to empty for
     -- selecting simple values (such as internal database functions).
