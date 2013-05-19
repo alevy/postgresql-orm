@@ -36,35 +36,6 @@ import Data.GetField
 import Database.PostgreSQL.ORM.DBSelect
 import Database.PostgreSQL.ORM.Model
 
--- | Create a join of the 'selFields', 'selFrom', 'selJoins', and
--- 'selWhere' clauses of two 'DBSelect' queries.  Other fields are
--- simply taken from the first 'DBSelect', meaning the values in the
--- second table are ignored.
-dbJoin :: DBSelect a            -- ^ First table
-          -> Query              -- ^ Join keyword (@JOIN@, @LEFT JOIN@, etc.)
-          -> DBSelect b         -- ^ Second table
-          -> Query  -- ^ Predicate (if any) including @ON@ or @USING@ keyword
-          -> DBSelect (a :. b)
-dbJoin left joinOp right onClause = left {
-    selFields = Query $ S.concat [fromQuery $ selFields left, ", ",
-                                  fromQuery $ selFields right]
-  , selJoins = selJoins left ++
-               Join joinOp (selFrom right) onClause :
-               selJoins right
-  , selWhereKeyword = Query $ if S.null whereClause then S.empty else "WHERE"
-  , selWhere = Query whereClause
-  }
-  where wl = fromQuery $ selWhere left
-        wr = fromQuery $ selWhere right
-        whereClause | S.null wl = wr
-                    | S.null wr = wl
-                    | otherwise = S.concat [wl, " AND ", wr]
-
-dbProject :: (Model a) => DBSelect join -> DBSelect a
-dbProject dbs = r
-  where sela = modelDBSelect `gAsTypeOf1` r
-        r = dbs { selFields = selFields sela }
-
 -- | A trivial 'ToRow' instance that can be passed to 'query'.  This
 -- structure is useful when you want to build up parameters piecemeal
 -- or stick them in a data structure.  To ensure a uniform type

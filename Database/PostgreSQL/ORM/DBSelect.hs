@@ -4,11 +4,18 @@
 {-# LANGUAGE TypeOperators #-}
 
 module Database.PostgreSQL.ORM.DBSelect (
-    Join(..), DBSelect(..), emptyDBSelect, renderDBSelect
-  , addWhere, setOrderBy, setLimit, setOffset
-  , buildDBSelect
-  , modelDBSelect
+    -- * The DBSelect structure
+    Join(..), DBSelect(..)
+    -- * Executing DBSelects
   , dbSelectParams, dbSelect
+  , renderDBSelect, buildDBSelect
+    -- * Creating DBSelects
+  , emptyDBSelect
+  , modelDBSelect
+  , dbJoin, dbJoinModels
+  , dbProject
+    -- * Altering DBSelects
+  , addWhere, setOrderBy, setLimit, setOffset
   ) where
 
 import Blaze.ByteString.Builder
@@ -92,6 +99,8 @@ instance (GDBS f) => GDBS (M1 i c f) where
   gdbsDefault = M1 gdbsDefault
   gdbsQuery = gdbsQuery . unM1
 
+-- | A 'DBSelect' structure with keywords @\"SELECT\"@ and @\"FROM\"@
+-- and everything else empty.
 emptyDBSelect :: DBSelect a
 emptyDBSelect = (to gdbsDefault) { selSelectKeyword = fromString "SELECT"
                                  , selFromKeyword = fromString "FROM" }
@@ -123,6 +132,7 @@ setLimit i dbs = dbs { selLimit = fmtSql "LIMIT ?" (Only i) }
 setOffset :: DBSelect a -> Int -> DBSelect a
 setOffset dbs i = dbs { selOffset = fmtSql "OFFSET ?" (Only i) }
 
+-- | A 'DBSelect' that returns all rows of a model.
 modelDBSelect :: (Model a) => DBSelect a
 modelDBSelect = r
   where mi = modelIdentifiers `gAsTypeOf1` r
@@ -149,3 +159,44 @@ dbSelect :: (Model a) => Connection -> DBSelect a -> IO [a]
 dbSelect c dbs = map lookupRow <$> query_ c q
   where q = renderDBSelect dbs
 
+-- | Create a join of the 'selFields', 'selFrom', 'selJoins', and
+-- 'selWhere' clauses of two 'DBSelect' queries.  Other fields are
+-- simply taken from the first 'DBSelect', meaning the values in the
+-- second table are ignored.
+dbJoin :: DBSelect a      -- ^ First table
+          -> Query        -- ^ Join keyword (@\"JOIN\"@, @\"LEFT JOIN\"@, etc.)
+          -> DBSelect b   -- ^ Second table
+          -> Query  -- ^ Predicate (if any) including @ON@ or @USING@ keyword
+          -> DBSelect (a :. b)
+dbJoin left joinOp right onClause = left {
+    selFields = Query $ S.concat [fromQuery $ selFields left, ", ",
+                                  fromQuery $ selFields right]
+  , selJoins = selJoins left ++
+               Join joinOp (selFrom right) onClause :
+               selJoins right
+  , selWhereKeyword = Query $ if S.null whereClause then S.empty else "WHERE"
+  , selWhere = Query whereClause
+  }
+  where wl = fromQuery $ selWhere left
+        wr = fromQuery $ selWhere right
+        whereClause | S.null wl = wr
+                    | S.null wr = wl
+                    | otherwise = S.concat [wl, " AND ", wr]
+
+-- | A version of 'dbJoin' that uses 'modelDBSelect' for the joined
+-- tables.
+dbJoinModels :: (Model a, Model b) =>
+                Query           -- ^ Join keyword
+                -> Query        -- ^ @ON@ or @USING@ predicate
+                -> DBSelect (a :. b)
+dbJoinModels kw on = dbJoin modelDBSelect kw modelDBSelect on
+
+-- | Restrict the fields returned by a DBSelect to be those of a
+-- single 'Model' @a@.  It only makes sense to do this if all the
+-- fields of @a@ are part of @join@, but no static check is performed.
+-- If you @dbProject@ a type that doesn't make sense, you will get a
+-- runtime error from a failed database query.
+dbProject :: (Model a) => DBSelect join -> DBSelect a
+dbProject dbs = r
+  where sela = modelDBSelect `gAsTypeOf1` r
+        r = dbs { selFields = selFields sela }
