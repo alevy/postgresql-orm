@@ -12,12 +12,13 @@ module Database.PostgreSQL.ORM.Model (
       -- * Data types for holding primary keys
     , DBKeyType, DBKey(..), isNullKey
     , DBRef, DBRefUnique, GDBRef(..), mkDBRef
-    , As(..), fromAs, RowAlias(..)
       -- * Database operations on Models
-    , findRow, save, destroy, destroyByRef
+    , findAll, findRow, save, destroy, destroyByRef
       -- * Functions for accessing and using Models
     , modelName, primaryKey, modelSelectFragment
     , LookupRow(..), UpdateRow(..), InsertRow(..)
+      -- * Table aliases
+    , As(..), fromAs, RowAlias(..)
       -- * Low-level functions providing manual access to defaults
     , defaultModelInfo
     , defaultModelTable, defaultModelColumns, defaultModelGetPrimaryKey
@@ -28,10 +29,12 @@ module Database.PostgreSQL.ORM.Model (
     , defaultModelInsertQuery, defaultModelDeleteQuery
       -- * Helper functions and miscellaneous internals
     , quoteIdent, NormalRef(..), UniqueRef(..)
-    , GPrimaryKey0(..), GColumns(..), GDatatypeName(..)
+    , defaultFromRow, defaultToRow
     , printq
-      -- * Low-level functions for generic FromRow/ToRow
-    , GFromRow(..), defaultFromRow, GToRow(..), defaultToRow
+      -- ** Helper classes
+      -- $HelperClasses
+    , GPrimaryKey0, GColumns, GDatatypeName
+    , GFromRow, GToRow
     ) where
 
 import Control.Applicative
@@ -107,11 +110,12 @@ isNullKey NullKey = True
 isNullKey _       = False
 
 
--- | Many operations can take either a 'DBRef' or a 'DBURef' (both of
--- which consist internally of a 'DBKeyType').  Hence, these two types
--- are just type aliases to a generalized reference type @GDBRef@,
--- where @GDBRef@'s first type argument, @reftype@, is a phantom type
--- denoting the flavor of reference ('NormalRef' or 'UniqueRef').
+-- | Many operations can take either a 'DBRef' or a 'DBRefUnique'
+-- (both of which consist internally of a 'DBKeyType').  Hence, these
+-- two types are just type aliases to a generalized reference type
+-- @GDBRef@, where @GDBRef@'s first type argument, @reftype@, is a
+-- phantom type denoting the flavor of reference ('NormalRef' or
+-- 'UniqueRef').
 newtype GDBRef reftype table = DBRef DBKeyType deriving (Eq, Data, Typeable)
 
 instance (Model t) => Show (GDBRef rt t) where
@@ -136,22 +140,20 @@ type DBRef = GDBRef NormalRef
 
 -- | See 'GDBRef'.
 data UniqueRef = UniqueRef deriving (Show, Data, Typeable)
--- | A @DBURef T@ is like a @'DBRef' T@, but with an added uniqeuness
--- constraint.  In other words, if type @A@ contains a @DBURef B@,
--- then each @B@ has one (or at most one) @A@ associated with it.  By
--- contrast, if type @A@ contains a @'DBRef' B@, then each @B@ may be
--- associated with many rows of type @A@.
+-- | A @DBRefUnique T@ is like a @'DBRef' T@, but with an added
+-- uniqeuness constraint.  In other words, if type @A@ contains a
+-- @DBRefUnique B@, then each @B@ has one (or at most one) @A@
+-- associated with it.  By contrast, if type @A@ contains a @'DBRef'
+-- B@, then each @B@ may be associated with many rows of type @A@.
 --
--- Functionally, @DBURef@ and @DBRef@ are treated the same by this
--- module.  However, other modules make a distinction.  For instance,
--- the 'HasOne' class requires the child type to point to its parent
--- with a @DBURef@, while the 'HasMany' class requires a 'DBRef'.
--- Moreover, if code creates database tables automatically, the column
--- for a 'DBURef' field should have a @UNIQUE@ constraint.
+-- Functionally, @DBRefUnique@ and @DBRef@ are treated the same by
+-- this module.  However, other modules make a distinction.  In
+-- particular, the 'modelCreateStatement' corresponding to a
+-- 'DBRefUnique' will include a @UNIQUE@ constraint.
 type DBRefUnique = GDBRef UniqueRef
 
 -- | Create a reference to the primary key of a 'Model', suitable for
--- storing in a different 'Model'.
+-- storing in a 'DBRef' or 'DBRefUnique' field of a different 'Model'.
 mkDBRef :: (Model a) => a -> GDBRef rt a
 mkDBRef a
   | (DBKey k) <- primaryKey a = DBRef k
@@ -161,11 +163,15 @@ mkDBRef a
 -- | A @ModelInfo T@ contains the information necessary for mapping
 -- @T@ to a database table.  Each @'Model'@ type has a single
 -- @ModelInfo@ associated with it, accessible through the 'modelInfo'
--- method.
+-- method of the 'Model' class.  Note the table and column names must
+-- all be unquoted in this data structure, as they will later be
+-- quoted using 'quoteIdent' by the 'modelIdentifiers' method.
 data ModelInfo a = ModelInfo {
     modelTable :: !S.ByteString
     -- ^ The name of the database table corresponding to this model.
-    -- The default is given by 'defaultModelTable'.
+    -- The default 'modelInfo' instance uses 'defaultModelTable',
+    -- which is the name of your data type with the first letter
+    -- downcased.
   , modelColumns :: ![S.ByteString]
     -- ^ The names of the database columns corresponding to fields of
     -- this model.  The column names should appear in the order in
@@ -225,6 +231,15 @@ instance (GColumns f) => GColumns (M1 D c f) where
 defaultModelColumns :: (Generic a, GColumns (Rep a)) => a -> [S.ByteString]
 defaultModelColumns = gColumns . from
 
+-- $HelperClasses
+--
+-- These classes are used internally to manipulate the 'Rep'
+-- representations of 'Generic' data structures.  You should not be
+-- defining or using these classes directly.  The names are exported
+-- so that you can include them in the context of the type signatures
+-- of your functions, should you wish to make use of the various
+-- @default@... funcitons in this file.
+
 -- | This class extracts the first field in a data structure when the
 -- field is of type 'DBKey'.  If you get a compilation error because
 -- of this class, then move the 'DBKey' first in your data structure.
@@ -254,21 +269,23 @@ defaultModelGetPrimaryKey = gPrimaryKey0 . from
 class GFromRow f where
   gFromRow :: RowParser (f p)
 instance GFromRow U1 where
+  {-# INLINE gFromRow #-}
   gFromRow = return U1
 instance (FromField c) => GFromRow (K1 i c) where
+  {-# INLINE gFromRow #-}
   gFromRow = K1 <$> field
 instance (GFromRow a, GFromRow b) => GFromRow (a :*: b) where
+  {-# INLINE gFromRow #-}
   gFromRow = (:*:) <$> gFromRow <*> gFromRow
 instance (GFromRow f) => GFromRow (M1 i c f) where
+  {-# INLINE gFromRow #-}
   gFromRow = M1 <$> gFromRow
+-- | This function provide as a 'fromRow' function for 'Generic'
+-- types, suitable as a default of the 'FromRow' class.  This module
+-- uses it as the default implementation of 'modelRead'.
 defaultFromRow :: (Generic a, GFromRow (Rep a)) => RowParser a
+{-# INLINE defaultFromRow #-}
 defaultFromRow = to <$> gFromRow
-
--- | Returns a 'RowParser' that parses each field of a data structure
--- in the order of the Haskell data type definition.  Each field must
--- be an instance of 'FromField'.
-defaultModelRead :: (Generic a, GFromRow (Rep a)) => RowParser a
-defaultModelRead = defaultFromRow
 
 
 class GToRow f where
@@ -281,6 +298,14 @@ instance (GToRow a, GToRow b) => GToRow (a :*: b) where
   gToRow (a :*: b) = gToRow a ++ gToRow b
 instance (GToRow f) => GToRow (M1 i c f) where
   gToRow (M1 fp) = gToRow fp
+-- | This function provides a 'toRow' function for 'Generic' types
+-- that marshalls each field of the data type in the order in which it
+-- appears in the type definition.  This function is /not/ a suitable
+-- implementation of 'modelWrite' (since it marshals the primary key,
+-- which is not supposed to be written).  However, it is required
+-- internally by 'defaultModelWrite', and exposed in the unlikely
+-- event it is of use to alternate generic 'modelWrite' functions.
+-- You probably don't want to call this function.
 defaultToRow :: (Generic a, GToRow (Rep a)) => a -> [Action]
 defaultToRow = gToRow . from
 
@@ -371,13 +396,18 @@ toUnderscore skipFirst | skipFirst = S8.pack . skip . S8.unpack
 -- unquoted SQL including @JOIN@ keywords.  In the case of joins,
 -- different elements of 'modelQColumns' may be qualified by different
 -- table names.
+--
+-- Note that 'modelQColumns' and 'modelQPrimaryColumn' both contain
+-- table-qualified names (e.g., @\"\\\"my_type\\\".\\\"key\\\"\"@),
+-- while 'modelQWriteColumns' contains only the quoted column names.
 data ModelIdentifiers a = ModelIdentifiers {
     modelQTable :: !S.ByteString
     -- ^ Literal SQL for the name of the table.
   , modelQColumns :: ![S.ByteString]
     -- ^ Literal SQL for each, table-qualified column.
   , modelQPrimaryColumn :: S.ByteString
-    -- ^ Literal SQL for the model's primary key column.
+    -- ^ Literal SQL for the model's table-qualified primary key
+    -- column.
   , modelQWriteColumns :: [S.ByteString]
     -- ^ Literal SQL for all the columns except the primary key.
     -- These are the columns that should be included in an @INSERT@ or
@@ -402,20 +432,20 @@ defaultModelIdentifiers mi = ModelIdentifiers {
 data ModelQueries a = ModelQueries {
     modelLookupQuery :: !Query
     -- ^ A query template for looking up a model by its primary key.
-    -- Should expect a single query parameter, namely the 'DBKey'
+    -- Expects a single query parameter, namely the 'DBKey' or 'DBRef'
     -- being looked up.
   , modelUpdateQuery :: !Query
     -- ^ A query template for updating an existing 'Model' in the
-    -- database.  Expects as query parameters every column of the
-    -- model /except/ the primary key, followed by the primary key.
-    -- (The primary key is not written to the database, just used to
-    -- select the row to change.)
+    -- database.  Expects as query parameters a value for every column
+    -- of the model /except/ the primary key, followed by the primary
+    -- key.  (The primary key is not written to the database, just
+    -- used to select the row to change.)
   , modelInsertQuery :: !Query
     -- ^ A query template for inserting a new 'Model' in the database.
-    -- The query parameters are all columns /except/ the primary key.
-    -- The query should return the full row as stored in the database
-    -- (including the values of fields, such as the primary key, that
-    -- have been chosen by the database server).
+    -- The query parameters are values for all columns /except/ the
+    -- primary key.  The query should return the full row as stored in
+    -- the database (including the values of fields, such as the
+    -- primary key, that have been chosen by the database server).
   , modelDeleteQuery :: !Query
     -- ^ A query template for deleting a 'Model' from the database.
     -- Should have a single query parameter, namely the 'DBKey' of the
@@ -466,22 +496,26 @@ defaultModelQueries mi = ModelQueries {
 -- class conveys information necessary to move a Haskell data
 -- structure in and out of a database table.
 --
---   * 'modelInfo' provides information about translating between the
---     Haskell data type and the database representation, in the form
---     of a 'ModelInfo' data structure.  Among other things, this
---     structure specifies the name of the database table, the names
---     of the database columns corresponding to the Haskell data
---     structure fields, and how to convert the data structure to and
---     from database rows.
+--   * 'modelInfo' provides information about how the Haskell data
+--     type is stored in the database, in the form of a 'ModelInfo'
+--     data structure.  Among other things, this structure specifies
+--     the name of the database table, the names of the database
+--     columns corresponding to the Haskell data structure fields, and
+--     the position of the primary key in both the database colums and
+--     the Haskell data structure.
 --
 --   * 'modelIdentifiers' contains the table and column names verbatim
 --     as they should be inserted into SQL queries.  For normal
---     models, these are simply double-quoted versions of the names in
---     'modelInfo', with the column names qualified by the table name.
---     However, for special cases such as join relations (with ':.')
---     or row aliases (with 'As'), 'modelIdentifiers' can modify the
---     table name with unquoted SQL identifiers (such as @JOIN@ and
---     @AS@) and change the qualified column names appropriately.
+--     models, these are simply double-quoted (with 'quoteIdent')
+--     versions of the names in 'modelInfo', with the column names
+--     qualified by the double-quoted table name.  However, for
+--     special cases such as join relations (with ':.')  or row
+--     aliases (with 'As'), 'modelIdentifiers' can modify the table
+--     name with unquoted SQL identifiers (such as @JOIN@ and @AS@)
+--     and change the qualified column names appropriately.
+--
+--   * 'modelRead' and 'modelWrite' convert between the Haskell data
+--     structure of the model and database results and parameters.
 --
 --   * 'modelQueries' provides pre-formatted 'Query' templates for
 --     'findRow', 'save', and 'destroy'.  The default 'modelQueries'
@@ -489,21 +523,23 @@ defaultModelQueries mi = ModelQueries {
 --     modified.  However, for degenerate tables (such as joins
 --     created with ':.'), it is reasonable to make 'modelQueries'
 --     always throw an exception, thereby disallowing ordinary queries
---     and requiring use of more general functions such as
---     'findWhere'.
+--     and requiring use of more general query functions.
 --
--- 'modelInfo' has a reasonable default implementation for
--- types that are members of the 'Generic' class (using GHC's
--- @DeriveGeneric@ extension), provided two conditions hold:
+-- 'modelInfo' has a reasonable default implementation for types that
+-- are members of the 'Generic' class (using GHC's @DeriveGeneric@
+-- extension), provided the following conditions hold:
 --
 --   1. The data type must have a single constructor that is defined
---   using record selector syntax.
+--      using record selector syntax.
 --
 --   2. The very first field of the data type must be a 'DBKey' to
 --      represent the primary key.  Other orders will cause a
 --      compilation error.
 --
--- If both of these conditions hold and your database naming scheme
+--   3. Every field of the data structure must be an instance of
+--      'FromRow' and 'ToRow'.
+--
+-- If these three conditions hold and your database naming scheme
 -- follows the conventions of this module, it is reasonable to have a
 -- completely empty (default) instance declaration:
 --
@@ -540,8 +576,8 @@ defaultModelQueries mi = ModelQueries {
 -- You can implement other patterns like 'underscoreModelInfo' by
 -- calling 'defaultModelInfo' and modifying the results.
 -- Alternatively, this module exposes the lower-level functions from
--- which 'defaultModelInfo' is built (e.g., 'defaultModelTable',
--- 'defaultModelColumns', 'defaultModelGetPrimaryKey', etc.).
+-- which 'defaultModelInfo' is built ('defaultModelTable',
+-- 'defaultModelColumns', 'defaultModelGetPrimaryKey').
 class Model a where
   modelInfo :: ModelInfo a
   default modelInfo :: (Generic a, GDatatypeName (Rep a), GColumns (Rep a)
@@ -553,18 +589,19 @@ class Model a where
   {-# INLINE modelIdentifiers #-}
   modelIdentifiers = defaultModelIdentifiers modelInfo
 
-  -- | Note that if @a@ an instance of 'FromRow', a fine definition of
-  -- this is @modelRead = fromRow@.  The default is to construct a row
-  -- parser using the 'Generic' class.  However, it is crucial that
-  -- the columns be parsed in the same order they are listed in the
-  -- 'modelColumns' field of @a@'s 'ModelInfo' structure.
+  -- | Note that if type @a@ is an instance of 'FromRow', a fine
+  -- definition of @modelRead@ is @modelRead = fromRow@.  The default
+  -- is to construct a row parser using the 'Generic' class.  However,
+  -- it is crucial that the columns be parsed in the same order they
+  -- are listed in the 'modelColumns' field of @a@'s 'ModelInfo'
+  -- structure.
   modelRead :: RowParser a
   default modelRead :: (Generic a, GFromRow (Rep a)) => RowParser a
   {-# INLINE modelRead #-}
   modelRead = defaultFromRow
 
   -- | Marshal all fields of @a@ /except/ the primary key.  As with
-  -- 'modelRead', the fields must be marshaled the the same order the
+  -- 'modelRead', the fields must be marshaled in the same order the
   -- corresponding columns are listed in 'modelColumns', only with the
   -- primary key (generally column 0) deleted.
   --
@@ -572,12 +609,14 @@ class Model a where
   -- 'ToRow', because 'toRow' would include the primary key.
   -- Similarly, do /not/ define this as 'defaultToRow'.  On the other
   -- hand, it is reasonable for @modelWrite@ to return an error for
-  -- degenerate models (such as joins) that should never be written.
+  -- degenerate models (such as joins) that should never be 'save'd.
   modelWrite :: a -> [Action]
   default modelWrite :: (Generic a, GToRow (Rep a)) => a -> [Action]
   {-# INLINE modelWrite #-}
   modelWrite = defaultModelWrite
 
+  -- | This method should either throw an exception or use the default
+  -- implementation.
   modelQueries :: ModelQueries a
   {-# INLINE modelQueries #-}
   modelQueries = defaultModelQueries modelIdentifiers
@@ -596,11 +635,9 @@ joinModelIdentifiers = r
         mib = modelIdentifiers `gAsTypeOf1_1` r
 
 -- | A degenerate instance of model representing a database join.  The
--- ':.' instance only allows limited queries such as 'findWhere' and
--- 'findAll'.  In particular, there is no primary key and no ability
--- to 'save' or 'destroy' such a join.  Attempts to use such functions
--- (including 'findRow', which requires a primary key) will result in
--- an error.
+-- ':.' instance does not allows normal model operations such as
+-- 'findRow', 'save', and 'destroy'.  Attempts to use such functions
+-- will result in an exception.
 instance (Model a, Model b) => Model (a :. b) where
   modelInfo = error "attempt to access ModelInfo of join type :."
   modelIdentifiers = joinModelIdentifiers
@@ -639,8 +676,8 @@ class RowAlias a where
   -- Keep in mind that PostgreSQL folds unquoted identifiers to
   -- lower-case.  However, this library quotes row aliases in @SELECT@
   -- statements, thereby preserving case.  Hence, if you want to call
-  -- 'findWhere' without double-quoting row aliases in your 'Query',
-  -- you should avoid capital letters in alias names.
+  -- construct a @WHERE@ clause without double-quoting row aliases in
+  -- your 'Query', you should avoid capital letters in alias names.
   --
   -- A default implementation of @rowAliasName@ exists for unit types
   -- (as well as empty data declarations) in the 'Generic' class.  The
@@ -656,16 +693,19 @@ class RowAlias a where
 
 -- | The newtype @As@ can be wrapped around an existing type to give
 -- it a table name alias in a query.  This is necessary when a model
--- is being joined with itself, to distinguish the two instances of
--- the database table.  For example:
+-- is being joined with itself, to distinguish the two joined
+-- instances of the same table.
 --
--- @{-\# LANGUAGE DeriveGeneric, OverloadedStrings #-}
+-- For example:
 --
---data X = X deriving
+-- @{-\# LANGUAGE OverloadedStrings #-}
+--
+--data X = X
 --instance 'RowAlias' X where rowAliasName = const \"x\"
 --
 -- \  ...
---    r <- 'findWhere_' \"bar.bar_key = x.bar_parent\" c () :: IO [Bar :. As X Bar]
+--    r <- 'dbSelect' c $ addWhere \"bar.bar_key = x.bar_parent\" modelDBSelect
+--         :: IO [Bar :. As X Bar]
 -- @
 newtype As alias row = As { unAs :: row } deriving (Show)
 
@@ -679,7 +719,7 @@ newtype As alias row = As { unAs :: row } deriving (Show)
 -- >
 -- > ...
 -- >   r <- map (\(b1 :. b2) -> (b1, fromAs X b2)) <$>
--- >            findWhere "bar.bar_key = X.bar_parent" c ()
+-- >       dbSelect c $ addWhere \"bar.bar_key = x.bar_parent\" modelDBSelect
 fromAs :: alias -> As alias row -> row
 fromAs _ (As row) = row
 
@@ -697,7 +737,7 @@ aliasModelIdentifiers mi = ModelIdentifiers {
         qcols = map qcol $ modelColumns mi
         pki = modelPrimaryColumn mi
 
--- | A degenerate instance of model that re-names the row with a SQL
+-- | A degenerate instance of 'Model' that re-names the row with a SQL
 -- @AS@ keyword.  This is primarily useful when joining a model with
 -- itself.  Hence, standard operations ('findRow', 'save', 'destroy')
 -- are not allowed on 'As' models.
@@ -748,8 +788,19 @@ newtype UpdateRow a = UpdateRow a deriving (Show)
 instance (Model a) => ToRow (UpdateRow a) where
   toRow (UpdateRow a) = toRow $ InsertRow a :. Only (primaryKey a)
 
--- | Follow a 'DBRef' or 'DBURef' and fetch the target row from the
--- database into a 'Model' type @r@.
+-- | Dump an entire model.  Useful for development and debugging only,
+-- as every row will be read into memory before the function returns.
+--
+-- Note that unlike the other primary model operations, it is okay to
+-- call 'findAll' even on degenerate models such as 'As' and ':.'.
+findAll :: (Model r) => Connection -> IO [r]
+findAll c = action
+  where mi = modelIdentifiers `gAsTypeOf1_1` action
+        q = Query $ modelSelectFragment mi
+        action = map lookupRow <$> query_ c q
+
+-- | Follow a 'DBRef' or 'DBRefUnique' and fetch the target row from
+-- the database into a 'Model' type @r@.
 findRow :: (Model r) => Connection -> GDBRef rt r -> IO (Maybe r)
 findRow c k = action
   where qs = modelQueries `gAsTypeOf1_1` action
