@@ -43,7 +43,7 @@ data FromClause = FromModel { fcVerbatim :: !Query
                            , fcCanonical :: !S.ByteString }
                   deriving Show
 
--- | A deconstructed SQL select statement.
+-- | A deconstructed SQL select statement, for easier manipulation.
 data DBSelect a = DBSelect {
     selWith :: !Query
   , selSelectKeyword :: !Query

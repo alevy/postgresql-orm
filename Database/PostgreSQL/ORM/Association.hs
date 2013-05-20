@@ -37,7 +37,7 @@ import Database.PostgreSQL.ORM.Model
 
 -- | A data structure representing a relationship between a model @a@
 -- and a model @b@.  At a high level, an @Association a b@ tells you
--- how to find rows of type @b@s given rows of type @a@.  More
+-- how to find rows of type @b@ given rows of type @a@.  More
 -- concretely, this boils down to being able to make two types of
 -- query.
 --
@@ -66,9 +66,13 @@ data Association a b = Association {
     -- ^ General select returning all instances of @a@ and @b@ that
     -- match according to the association.
   , assocSelectOnlyB :: !(DBSelect b)
-    -- ^ The right-and side of the 'assocSelect' query.  This query
+    -- ^ The right-hand side of the 'assocSelect' query.  This query
     -- makes no mention of type @a@ (but can be combined with the next
-    -- two fields to form an optimized query).
+    -- two fields to form an optimized query).  You probably never
+    -- want to use this directly, and should instead use either
+    -- 'findAssoc' or 'assocWhere'.  Also note this is not useful for
+    -- selecting all the @b@s in the relation; for that you should use
+    -- 'assocProject'.
   , assocWhereQuery :: !Query
     -- ^ A @WHERE@ clause to find all the 'b's associated with a
     -- particular @a@.  This can often be done more efficiently than
@@ -92,7 +96,8 @@ instance Show (Association a b) where
 -- predicates on both @a@ and @b@.  (Note the contrast to
 -- 'assocSelectOnlyB', which does not touch table @a@ at all, and
 -- hence in the case of an @INNER JOIN@ might return rows of @b@ that
--- are not part of the association.)
+-- should not be part of the association.  'assocSelectOnlyB' is
+-- intended for use only in conjunction with 'assocWhereQuery'.)
 assocProject :: (Model b) => Association a b -> DBSelect b
 assocProject = dbProject . assocSelect
 
