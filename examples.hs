@@ -12,6 +12,7 @@ import Database.PostgreSQL.Simple
 import GHC.Generics
 
 import Control.Applicative
+import Database.PostgreSQL.Devel
 import Database.PostgreSQL.Keywords
 import System.IO.Unsafe
 import Data.GetField

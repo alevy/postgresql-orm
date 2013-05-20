@@ -5,6 +5,7 @@ module Database.PostgreSQL.Devel (
       createLocalDB, configLocalDB, startLocalDB
     , initLocalDB, stopLocalDB, setLocalDB
     , withTempDB
+    , resetConnection
   ) where
 
 import Control.Exception
@@ -197,3 +198,8 @@ withTempDB f = bracket createdir removeDirectoryRecursive $ \d ->
           tmp <- getTemporaryDirectory
           mkdtemp $ tmp </> "db."
 
+-- | Reset a connection to its default state before re-cycling it for
+-- another thread or request.
+resetConnection :: Connection -> IO ()
+resetConnection c = (void $ execute_ c "DISCARD ALL") `catch` \SqlError{} ->
+  void $ execute_ c "ROLLBACK" >> execute_ c "DISCARD ALL"
