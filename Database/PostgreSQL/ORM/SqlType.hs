@@ -2,10 +2,11 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-module Database.PostgreSQL.ORM.SqlType (SqlType(..)) where
+module Database.PostgreSQL.ORM.SqlType (SqlType(..), getTypeOid) where
 
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Lazy as L
+import Data.Functor
 import Data.Int
 import Data.Monoid
 import qualified Data.Text as ST
@@ -18,9 +19,22 @@ import Database.PostgreSQL.Simple.FromField
 import Database.PostgreSQL.Simple.Time
 import Database.PostgreSQL.Simple.ToField
 import Database.PostgreSQL.Simple.TypeInfo.Static
+import Database.PostgreSQL.Simple.Types
 
 import Data.AsTypeOf
 import Database.PostgreSQL.ORM.Model
+
+newtype ExtractTypeOid = ExtractTypeOid Oid
+instance FromField ExtractTypeOid where
+  fromField f _ = return $ ExtractTypeOid $ typeOid f
+
+-- | Retreive the 'Oid' corresponding to a type.  You can subsequently
+-- use the 'Oid' to call 'getTypeInfo' for more informaiton on the
+-- type.
+getTypeOid :: Connection -> S.ByteString -> IO Oid
+getTypeOid c name = do
+  [Only (ExtractTypeOid ti)] <- query_ c $ Query $ "SELECT NULL :: " <> name
+  return ti
 
 -- | The class of Haskell types that can be converted to and from a
 -- particular SQL type.  For most instances, you only need to define
