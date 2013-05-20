@@ -4,11 +4,11 @@ module Database.PostgreSQL.ORM (
     Model(modelInfo), ModelInfo(..)
   , defaultModelInfo, underscoreModelInfo
   , DBKey(..), DBRef, DBRefUnique, mkDBRef
-  , (:.), As(..), RowAlias(..), fromAs, toAs
+  , (:.), As(..), RowAlias(..), fromAs
   -- ** Single-row operations
   , findRow, save, destroy, destroyByRef
   -- * Abstracted select queries
-  , DBSelect, modelDBSelect, dbSelectParams, dbSelect
+  , DBSelect(..), modelDBSelect, dbSelectParams, dbSelect
   , addWhere_, addWhere, setOrderBy, setLimit, setOffset
   -- * Associations between models
   , Association, assocSelect, assocProject, assocWhere, findAssoc

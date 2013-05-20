@@ -80,12 +80,13 @@ data FromClause = FromModel {
   deriving Show
 
 -- | A deconstructed SQL select statement that allows easier
--- manipulation of individual terms.  Most of the functions in this
--- module work with the 'selFields', 'selFrom', and 'selWhere' terms.
--- Other terms may get lost when combining queries with join
--- operations.  Hence it is advisable to set the other terms at the
--- end (or, if you set these fields, to collapse your 'DBSelect'
--- structure into a subquery using `dbProject'`).
+-- manipulation of individual terms.  Several functions are provided
+-- to combine the 'selFields', 'selFrom', and 'selWhere' clauses of
+-- muliple @DBSelect@ structures.  Other clauses may be discarded when
+-- combining queries with join operations.  Hence it is advisable to
+-- set the other clauses at the end (or, if you set these fields, to
+-- collapse your 'DBSelect' structure into a subquery using
+-- `dbProject'`).
 data DBSelect a = DBSelect {
     selWith :: !Query
   , selSelectKeyword :: !Query
@@ -204,7 +205,7 @@ addWhere q p dbs
   where clause = mconcat [fromChar '(', buildSql q p, fromChar ')']
 
 -- | Set the @ORDER BY@ clause of a 'DBSelect'.  Note that unlike
--- @addWhere@, the query /must/ contain the @ORDER BY@ keywords.
+-- @addWhere@, the 'Query' /must/ contain the @ORDER BY@ keywords.
 setOrderBy :: Query -> DBSelect a -> DBSelect a
 setOrderBy (Query ob) dbs = dbs { selOrderBy = Query $ "ORDER BY " <> ob }
 

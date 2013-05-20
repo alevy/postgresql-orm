@@ -41,20 +41,20 @@ import Database.PostgreSQL.ORM.Model
 -- concretely, this boils down to being able to make two types of
 -- query.
 --
---  * You want to look up a bunch of @(a :. b)@s, filtering using
+--  * You want to look up a bunch of @(a ':.' b)@s, filtering using
 --  predicates on both @a@ and @b@ (e.g., get a list of recent posts
 --  and their authors).  For this purpose, you can use 'assocSelect',
 --  which allows you to 'addWhere' predicates mentioning columns in
 --  both @a@ and @b@.
 --
 --  * You already have an instance of type @a@, and want to find all
---  the @b@s associated with it.  For that you use the function
---  'findAssoc', which internally accesses fields 'assocSelectOnlyB',
---  'assocWhereQuery', and 'assocWhereParam'.  This type of query is
---  strictly less general than the first one, but can be formulated in
---  a more efficient way by extracting values directly from a concrete
---  instance of @a@ without needing to touch table @a@ in the
---  database.
+--  the @b@s associated with it.  For that you use either 'assocWhere'
+--  or 'findAssoc' (which internally accesses fields
+--  'assocSelectOnlyB', 'assocWhereQuery', and 'assocWhereParam').
+--  This type of query is strictly less general than the first one,
+--  but can be formulated in a more efficient way by extracting values
+--  directly from a concrete instance of @a@ without needing to touch
+--  table @a@ in the database.
 --  
 -- Note that an @Association@ is asymmetric.  It tells you how to get
 -- @b@s from @a@s, but not vice versa.  In practice, there will almost
