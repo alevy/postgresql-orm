@@ -23,7 +23,7 @@
 --   * @asTypeOf/N/@ is equivalent to @\\a t -> a ``asTypeOf``
 --   undef/N/ t@.
 --
---   * @gAsTypeOf/N/@ is like @asTypeOf/N/@, but constraints a type
+--   * @gAsTypeOf/N/@ is like @asTypeOf/N/@, but constrains a type
 --   argument rather than a type.  This is analogous to 'gcast'
 --   ('gcast1', etc.) in "Data.Typeable".  For example:
 --
