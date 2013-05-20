@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 
 -- | Functions for initializing self-contained local postgreSQL
 -- database clusters (useful in development more than production).

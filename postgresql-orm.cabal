@@ -39,6 +39,7 @@ library
                  , Database.PostgreSQL.Describe
                  , Database.PostgreSQL.Escape
                  , Database.PostgreSQL.Migration
+                 , Database.PostgreSQL.ORM
                  , Database.PostgreSQL.ORM.Association
                  , Database.PostgreSQL.ORM.CreateTable
                  , Database.PostgreSQL.ORM.DBSelect

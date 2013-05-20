@@ -204,7 +204,7 @@ instance Show (GDBRefInfo rt c p) where
 -- 'DBRefUnique').  The functions in this library do not care what
 -- type of reference is used.  The type is generalized to 'GDBRefInfo'
 -- just to make it easier to assign a selector to 'dbrefSelector' when
--- the selector returns a 'DBRefUnique'.  For example,
+-- the selector returns a 'DBRefUnique'.  Note, however, that
 -- 'defaultDBRefInfo' returns a 'DBRefInfo' regardless of the flavor
 -- of reference actually encountered.
 type DBRefInfo = GDBRefInfo NormalRef
@@ -234,15 +234,15 @@ instance Extractor ExtractRef (Maybe (GDBRef rt a)) (DBRef (As alias a))
 --   might be @NULL@.  Note, however, that an exception will be thrown
 --   if you call 'findAssoc' on a child whose reference is 'Nothing'.
 --
--- Note a special case arises when a Model contains a 'DBRef' to
--- itself.  If you just wish to find parents and children given an
--- existing structure (i.e., 'findAssoc'), it is okay to declare an
+-- A special case arises when a Model contains a 'DBRef' to itself.
+-- If you just wish to find parents and children given an existing
+-- structure (i.e., 'findAssoc'), it is okay to declare an
 -- @'Association' MyType MyType@.  However, attempts to use
 -- 'assocSelect' will then fail.  To work around this problem, the
--- parent must use a row alias.  Note that /aliasing the child will
--- not work/', since the 'As' data structure will not contain a
--- 'DBRef' field, only the contents of the 'As' data structure.  For
--- example:
+-- parent must use a row alias.  Note that
+-- /aliasing the child will not work/, since the 'As' data structure
+-- will not contain a 'DBRef' field, only the contents of the 'As'
+-- data structure.  For example:
 --
 -- > data Bar = Bar {
 -- >     barId :: !DBKey

@@ -81,9 +81,9 @@ data FromClause = FromModel {
 
 -- | A deconstructed SQL select statement that allows easier
 -- manipulation of individual terms.  Most of the functions in this
--- module work with the 'selFields', 'selFields', and 'selWhere'
--- terms.  Other terms may get lost when combining queries with join
--- operations.  Hence it is advisable so set the other terms at the
+-- module work with the 'selFields', 'selFrom', and 'selWhere' terms.
+-- Other terms may get lost when combining queries with join
+-- operations.  Hence it is advisable to set the other terms at the
 -- end (or, if you set these fields, to collapse your 'DBSelect'
 -- structure into a subquery using `dbProject'`).
 data DBSelect a = DBSelect {
@@ -187,7 +187,7 @@ addWhere_ q dbs
 
 -- | Add a where clause, and pre-render parameters directly into the
 -- clause.  The argument @p@ must have exactly as many fields as there
--- are @\'?\'@ characters in the 'Query@'.  Example:
+-- are @\'?\'@ characters in the 'Query'.  Example:
 --
 -- > bars <- dbSelect c $ addWhere "bar_id = ?" (Only target_id) $
 -- >                      (modelDBSelect :: DBSelect Bar)
@@ -229,7 +229,7 @@ modelDBSelect = r
 -- characters embedeed in various fields of the 'DBSelect' must
 -- exactly match the number of fields in parameter type @p@.  Note the
 -- order of arguments is such that the 'DBSelect' can be pre-rendered
--- and the parameter supplied later.  Hence, you should use this
+-- and the parameters supplied later.  Hence, you should use this
 -- version when the 'DBSelect' is static.  For dynamically modified
 -- 'DBSelect' structures, you may prefer 'dbSelect'.
 dbSelectParams :: (Model a, ToRow p) => DBSelect a -> Connection -> p -> IO [a]
