@@ -54,7 +54,8 @@ selfJoinTable :: JoinTable Bar (As ParentBar Bar)
 selfJoinTable = defaultJoinTable
 
 selfJoin :: Association Bar (As ParentBar Bar)
-selfJoin = jtAssoc selfJoinTable
+otherSelfJoin :: Association (As ParentBar Bar) Bar
+(selfJoin, otherSelfJoin) = jtAssocs selfJoinTable
 
 
 toParent :: Association Bar (As ParentBar Bar)

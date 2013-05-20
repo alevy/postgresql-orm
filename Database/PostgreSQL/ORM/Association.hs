@@ -47,20 +47,21 @@ import Database.PostgreSQL.ORM.Model
 --  which allows you to 'addWhere' predicates mentioning columns in
 --  both @a@ and @b@.
 --
---  * You already have an instance of type @a@, and want to find all
+--  * Youa lready have an instance of type @a@, and want to find all
 --  the @b@s associated with it.  For that you use either 'assocWhere'
---  or 'findAssoc' (which internally accesses fields
---  'assocSelectOnlyB', 'assocWhereQuery', and 'assocWhereParam').
---  This type of query is strictly less general than the first one,
---  but can be formulated in a more efficient way by extracting values
---  directly from a concrete instance of @a@ without needing to touch
---  table @a@ in the database.
+--  or 'findAssoc' (which internally access fields 'assocSelectOnlyB',
+--  'assocWhereQuery', and 'assocWhereParam').  This type of query is
+--  strictly less general than the first one, but can be formulated in
+--  a more efficient way by extracting values directly from a concrete
+--  instance of @a@ without needing to touch table @a@ in the
+--  database.
 --  
 -- Note that an @Association@ is asymmetric.  It tells you how to get
 -- @b@s from @a@s, but not vice versa.  In practice, there will almost
--- always be an association in the other direction, too.  Several
--- functions in this file therefore create an @Association@ and its
--- inverse simultaneously, returning them as a pair.
+-- always be an association in the other direction, too.  Functions
+-- such as 'dbrefAssocs' and 'jtAssocs' therefore create an
+-- @Association@ and its inverse simultaneously, returning them as a
+-- pair.
 data Association a b = Association {
     assocSelect :: !(DBSelect (a :. b))
     -- ^ General select returning all instances of @a@ and @b@ that
@@ -129,6 +130,42 @@ nestAssoc ab bc = ab { assocSelect = dbNest (assocSelect ab) (assocSelect bc)
 
 -- | Combine two associations into one, and project away the middle
 -- type.  (The middle type can still be mentioned in @WHERE@ clauses.)
+--
+-- An example:
+--
+-- > data Author = Author {
+-- >     authorId :: DBKey
+-- >   } deriving (Show, Generic)
+-- > instance Model Author where modelInfo = underscoreModelInfo "author"
+-- > 
+-- > data Post = Post {
+-- >     postId :: DBKey
+-- >   , postAuthorId :: DBRef Author
+-- >   } deriving (Show, Generic)
+-- > instance Model Post where modelInfo = underscoreModelInfo "post"
+-- > 
+-- > data Comment = Comment {
+-- >     commentId :: DBKey
+-- >   , commentPostId :: DBRef Post
+-- >   } deriving (Show, Generic)
+-- > instance Model Comment where modelInfo = underscoreModelInfo "comment"
+-- > 
+-- > author_posts :: Association Author Post
+-- > post_author :: Association Post Author
+-- > (post_author, author_posts) = dbrefAssocs defaultDBRefInfo
+-- > 
+-- > -- Could equally well use dbrefAssocs as above
+-- > post_comments :: Association Post Comment
+-- > post_comments = has
+-- >
+-- > comment_post :: Association Comment Post
+-- > comment_post = belongsTo
+-- > 
+-- > comment_author :: Association Comment Author
+-- > comment_author = chainAssoc comment_post post_author
+-- > 
+-- > author_comments :: Association Author Comment
+-- > author_comments =  chainAssoc author_posts post_comments
 chainAssoc :: (Model a, Model b, Model c) =>
               Association a b -> Association b c -> Association a c
 chainAssoc ab bc = ab { assocSelect = dbChain (assocSelect ab) (assocSelect bc)
@@ -237,12 +274,15 @@ instance Extractor ExtractRef (Maybe (GDBRef rt a)) (DBRef (As alias a))
 -- A special case arises when a Model contains a 'DBRef' to itself.
 -- If you just wish to find parents and children given an existing
 -- structure (i.e., 'findAssoc'), it is okay to declare an
--- @'Association' MyType MyType@.  However, attempts to use
--- 'assocSelect' will then fail.  To work around this problem, the
--- parent must use a row alias.  Note that
--- /aliasing the child will not work/, since the 'As' data structure
--- will not contain a 'DBRef' field, only the contents of the 'As'
--- data structure.  For example:
+-- @'Association' MyType MyType@.  However, in this case attempts to
+-- use 'assocSelect' will then fail.  To work around this problem, the
+-- parent must use a row alias.
+--
+-- Note that currently /aliasing the child will not work/, since the
+-- 'As' data structure will not contain a 'DBRef' field, only the
+-- contents of the 'As' data structure.  An example of doing this
+-- correctly (using 'has' and 'belongsTo', both of which wrap
+-- @defaultDBRefInfo@):
 --
 -- > data Bar = Bar {
 -- >     barId :: !DBKey
@@ -367,7 +407,8 @@ data JoinTable a b = JoinTable {
 -- > selfJoinTable = defaultJoinTable
 -- > 
 -- > selfJoin :: Association Bar (As ParentBar Bar)
--- > selfJoin = jtAssoc selfJoinTable
+-- > otherSelfJoin :: Association (As ParentBar Bar) Bar
+-- > (selfJoin, otherSelfJoin) = jtAssocs selfJoinTable
 defaultJoinTable :: (Model a, Model b) => JoinTable a b
 defaultJoinTable
   | colA == colB = error "defaultJoinTable has default for self joins"
