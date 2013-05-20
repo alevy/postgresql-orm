@@ -18,7 +18,7 @@ module Database.PostgreSQL.ORM.Model (
     , modelName, primaryKey, modelSelectFragment
     , LookupRow(..), UpdateRow(..), InsertRow(..)
       -- * Table aliases
-    , As(..), fromAs, RowAlias(..)
+    , As(..), fromAs, toAs, RowAlias(..)
       -- * Low-level functions providing manual access to defaults
     , defaultModelInfo
     , defaultModelTable, defaultModelColumns, defaultModelGetPrimaryKey
@@ -44,6 +44,7 @@ import qualified Data.ByteString.Char8 as S8
 import Data.Char
 import Data.Data
 import Data.Int
+import Data.Maybe
 import Data.Monoid
 import Data.List hiding (find)
 import Data.String
@@ -424,6 +425,12 @@ data ModelIdentifiers a = ModelIdentifiers {
     -- contain unquoted SQL such as @\"\\\"MyType\\\" AS
     -- \\\"my_alias\\\"\"@, in which case @modelQualifier@ will
     -- contain @'Just' \"\\\"my_alias\\\"\"@.
+  , modelOrigTable :: !(Maybe S.ByteString)
+    -- ^ The original, unquoted name of the table representing the
+    -- model in the database.  Ordinarily, this should be the same as
+    -- 'modelTable' in 'ModelInfo', but in the case of 'As' aliases,
+    -- the 'modelTable' is an alias, and 'modelOrigTable' is the
+    -- original table.  'Nothing' for joins.
   } deriving (Show)
 
 -- | The default simply quotes the 'modelInfo' and 'modelColumns'
@@ -435,6 +442,7 @@ defaultModelIdentifiers mi = ModelIdentifiers {
   , modelQPrimaryColumn = qcols !! pki
   , modelQWriteColumns = deleteAt pki $ map quoteIdent $ modelColumns mi
   , modelQualifier = Just qtable
+  , modelOrigTable = Just $ modelTable mi
   }
   where qtable = quoteIdent (modelTable mi)
         qcol c = S.concat [qtable, ".", quoteIdent c]
@@ -643,6 +651,7 @@ joinModelIdentifiers = r
             , modelQPrimaryColumn =
               error "attempt to use primary key of join relation"
             , modelQualifier = Nothing
+            , modelOrigTable = Nothing
           }
         qtable | S.null $ modelQTable mib = modelQTable mia
                | S.null $ modelQTable mia = modelQTable mib
@@ -743,19 +752,41 @@ instance (RowAlias alias, Show row) => Show (As alias row) where
 -- >   r <- map (\(b1 :. b2) -> (b1, fromAs X b2)) <$>
 -- >       dbSelect c $ addWhere \"bar.bar_key = x.bar_parent\" modelDBSelect
 fromAs :: alias -> As alias row -> row
+{-# INLINE fromAs #-}
 fromAs _ (As row) = row
 
-aliasModelIdentifiers :: (RowAlias alias) => ModelInfo a
-                         -> ModelIdentifiers (As alias a)
-aliasModelIdentifiers mi = r
+-- | A type-restricted wrapper around the 'As' constructor, under the
+-- same rationale as 'fromAs'.  Not strict in its first argument.
+toAs :: alias -> row -> As alias row
+{-# INLINE toAs #-}
+toAs _ = As
+
+aliasModelInfo :: (Model a, RowAlias alias) =>
+                  ModelInfo a -> ModelInfo (As alias a)
+aliasModelInfo mi = r
+  where alias = rowAliasName $ undef1 r
+        r = mi { modelTable = alias
+               , modelGetPrimaryKey = modelGetPrimaryKey mi . unAs
+               }
+
+aliasModelIdentifiers :: (Model a, RowAlias alias) =>
+                         ModelInfo a -> ModelIdentifiers (As alias a)
+aliasModelIdentifiers mi
+  | not ok    = error $ "aliasModelIdentifiers: degenerate model " ++
+                show (modelQTable ida )
+  | otherwise = r
   where r = ModelIdentifiers {
-            modelQTable = S.concat [qtable, " AS ", alias]
+            modelQTable = S.concat [quoteIdent orig, " AS ", alias]
           , modelQColumns = qcols
           , modelQPrimaryColumn = qcols !! pki
           , modelQWriteColumns = deleteAt pki qcols
           , modelQualifier = Just alias
+          , modelOrigTable = Just orig
           }
-        qtable = quoteIdent (modelTable mi)
+        ida = modelIdentifiers `gAsTypeOf1` mi
+        ok = Just (modelQTable ida) == modelQualifier ida
+             && isJust (modelOrigTable ida)
+        Just orig = modelOrigTable ida
         alias = quoteIdent $ rowAliasName $ undef1 r
         qcol c = S.concat [alias, ".", quoteIdent c]
         qcols = map qcol $ modelColumns mi
@@ -766,10 +797,11 @@ aliasModelIdentifiers mi = r
 -- itself.  Hence, standard operations ('findRow', 'save', 'destroy')
 -- are not allowed on 'As' models.
 instance (Model a, RowAlias as) => Model (As as a) where
-  modelInfo = error "attempt to access \"As\" alias as noral Model"
+  {-# INLINE modelInfo #-}
+  modelInfo = aliasModelInfo modelInfo
   {-# INLINE modelRead #-}
   modelRead = As <$> modelRead
-  modelWrite = error "attempt to write \"As\" alias as noral Model"
+  modelWrite = error "attempt to write \"As\" alias as normal Model"
   {-# INLINE modelIdentifiers #-}
   modelIdentifiers = aliasModelIdentifiers modelInfo
   modelQueries = error "attempt to perform standard query on AS table alias"

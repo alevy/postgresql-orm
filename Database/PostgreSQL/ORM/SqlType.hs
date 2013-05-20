@@ -80,13 +80,15 @@ instance (Typeable a, SqlType a) => SqlType (V.Vector a) where
 instance (Model a) => SqlType (DBRef a) where
   sqlBaseType r@(DBRef k) = sqlBaseType k <> ref
     where t = modelInfo `gAsTypeOf1` r
+          Just orig = modelOrigTable $ modelIdentifiers `gAsTypeOf1` r
           ref = S.concat [
-              " REFERENCES ", quoteIdent (modelTable t) , "("
+              " REFERENCES ", quoteIdent orig, "("
               , quoteIdent (modelColumns t !! modelPrimaryColumn t), ")" ]
 
 instance (Model a) => SqlType (DBRefUnique a) where
   sqlBaseType r@(DBRef k) = sqlBaseType k <> ref
     where t = modelInfo `gAsTypeOf1` r
+          Just orig = modelOrigTable $ modelIdentifiers `gAsTypeOf1` r
           ref = S.concat [
-              " UNIQUE REFERENCES ", quoteIdent (modelTable t) , "("
+              " UNIQUE REFERENCES ", quoteIdent orig , "("
               , quoteIdent (modelColumns t !! modelPrimaryColumn t), ")" ]

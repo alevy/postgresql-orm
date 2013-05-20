@@ -49,6 +49,13 @@ instance Model Bar where modelInfo = underscoreModelInfo "bar"
 data ParentBar = ParentBar
 instance RowAlias ParentBar where rowAliasName _ = "parent_bar"
 
+selfJoinTable :: JoinTable Bar (As ParentBar Bar)
+selfJoinTable = defaultJoinTable
+
+selfJoin :: Association Bar (As ParentBar Bar)
+selfJoin = jtAssoc selfJoinTable
+
+
 toParent :: Association Bar (As ParentBar Bar)
 toParent = belongsTo
 

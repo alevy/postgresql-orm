@@ -5,17 +5,18 @@
 {-# LANGUAGE TypeOperators #-}
 
 module Database.PostgreSQL.ORM.Association (
-    Association(..), assocProject, findAssoc
+    Association(..), assocProject, assocWhere, findAssoc
     -- * Associations based on parent-child relationships
   , GDBRefInfo(..), DBRefInfo, defaultDBRefInfo, dbrefAssocs, has, belongsTo
     -- * Join table Associations
-  , JoinTable(..), defaultJoinTable
-  , jtAddStatement, jtRemoveStatement, jtParam, jtAssocs
-  , joinTable
+  , JoinTable(..), defaultJoinTable, jtAssocs, joinTable
+    -- ** Operations on join tables
+  , jtAdd, jtRemove, jtRemoveById
+    -- ** Semi-internal join table functions
+  , jtAddStatement, jtRemoveStatement, jtParam
+  , jtFlip, jtAssoc
     -- * Nested and chained associations
   , nestAssoc, chainAssoc
-    -- * Miscellaneous and internal details
-  , jtFlip, jtAssoc
   ) where
 
 import Control.Applicative
@@ -49,7 +50,7 @@ import Database.PostgreSQL.ORM.Model
 --  * You already have an instance of type @a@, and want to find all
 --  the @b@s associated with it.  For that you use the function
 --  'findAssoc', which internally accesses fields 'assocSelectOnlyB',
---  'assocWhere', and 'assocWhereParam'.  This type of query is
+--  'assocWhereQuery', and 'assocWhereParam'.  This type of query is
 --  strictly less general than the first one, but can be formulated in
 --  a more efficient way by extracting values directly from a concrete
 --  instance of @a@ without needing to touch table @a@ in the
@@ -68,20 +69,22 @@ data Association a b = Association {
     -- ^ The right-and side of the 'assocSelect' query.  This query
     -- makes no mention of type @a@ (but can be combined with the next
     -- two fields to form an optimized query).
-  , assocWhere :: !Query
+  , assocWhereQuery :: !Query
     -- ^ A @WHERE@ clause to find all the 'b's associated with a
     -- particular @a@.  This can often be done more efficiently than
     -- through 'assocSelect'.  The clause contains @\'?\'@ characters
     -- which should be filled in by 'assocWhereParam'.
   , assocWhereParam :: !(a -> [Action])
-    -- ^ The query parameters for the query returned by 'assocWhere'.
+    -- ^ The query parameters for the query returned by
+    -- 'assocWhereQuery'.
   }
 
 instance Show (Association a b) where
-  show assoc = "Association { assocSelect = " ++ show (assocSelect assoc) ++
-               ", assocSelectOnlyB = " ++ show (assocSelectOnlyB assoc) ++
-               ", assocWhereA = " ++ S8.unpack (fromQuery $ assocWhere assoc) ++
-               " }"
+  show assoc =
+    "Association { assocSelect = " ++ show (assocSelect assoc) ++
+    ", assocSelectOnlyB = " ++ show (assocSelectOnlyB assoc) ++
+    ", assocWhereQuery = " ++ S8.unpack (fromQuery $ assocWhereQuery assoc) ++
+    " }"
 
 -- | A projection of 'assocSelect', extracting only the fields of
 -- model @b@.  Note that this query touches table @a@ even if it does
@@ -89,18 +92,29 @@ instance Show (Association a b) where
 -- predicates on both @a@ and @b@.  (Note the contrast to
 -- 'assocSelectOnlyB', which does not touch table @a@ at all, and
 -- hence in the case of an @INNER JOIN@ might return rows of @b@ that
--- are not aprt of the association.)
+-- are not part of the association.)
 assocProject :: (Model b) => Association a b -> DBSelect b
 assocProject = dbProject . assocSelect
 
+-- | Returns a 'DBSelect' for all @b@s associated with a particular
+-- @a@.
+assocWhere :: (Model b) => Association a b -> a -> DBSelect b
+assocWhere ab a = addWhere (assocWhereQuery ab) (assocWhereParam ab a)
+                  (assocSelectOnlyB ab)
+
 -- | Follow an association to return all all of the @b@s associated
--- with a particular @a@.
+-- with a particular @a@.  The behavior is similar to:
+--
+-- > findAssoc' ab c a = dbSelect c $ assocWhere ab a
+--
+-- But if the first argument is a static association, this function
+-- may be marginally faster because it pre-renders most of the query.
 findAssoc :: (Model b) => Association a b -> Connection -> a -> IO [b]
 {-# INLINE findAssoc #-}
 findAssoc assoc = \c a ->
   map lookupRow <$> query c q (assocWhereParam assoc a)
   where q = renderDBSelect $
-            addWhere_ (assocWhere assoc) $ assocSelectOnlyB assoc
+            addWhere_ (assocWhereQuery assoc) $ assocSelectOnlyB assoc
 
 -- | Combine two associations into one.
 nestAssoc :: (Model a, Model b) =>
@@ -264,13 +278,13 @@ dbrefAssocs ri = (c_p, p_c)
         c_p = Association {
             assocSelect = dbJoinModels "JOIN" on
           , assocSelectOnlyB = modelDBSelect
-          , assocWhere = Query $ modelQPrimaryColumn idp <> " = ?"
+          , assocWhereQuery = Query $ modelQPrimaryColumn idp <> " = ?"
           , assocWhereParam = \child -> [toField $ dbrefSelector ri child]
           }
         p_c = Association {
             assocSelect = dbJoinModels "JOIN" on
           , assocSelectOnlyB = modelDBSelect
-          , assocWhere = Query $ dbrefQColumn ri <> " = ?"
+          , assocWhereQuery = Query $ dbrefQColumn ri <> " = ?"
           , assocWhereParam = \parent -> [toField $ primaryKey parent]
           }
 
@@ -306,7 +320,7 @@ belongsTo = fst $ dbrefAssocs defaultDBRefInfo
 -- | A data structure representing a dedicated join table in the
 -- database.  A join table differs from a model in that rows do not
 -- have primary keys.  Hence, model operations do not apply.
--- Nonetheless a join table conveys information about the relationship
+-- Nonetheless a join table conveys information about a relationship
 -- between models.
 --
 -- Note that all names in a @JoinTable@ should be unquoted.
@@ -330,16 +344,39 @@ data JoinTable a b = JoinTable {
 --
 -- * 'jtColumnB' is the name of model @b@, an @\'_\'@ character, and
 -- the name of the primary key column in table @b@.
+--
+-- Note that 'defaultJoinTable' cannot create a default join table for
+-- joining a model to itself, as following these rules the two columns
+-- would have the same name.  If you wish to join a table to itself,
+-- you have two options:  First, you can define the join table and
+-- assign the column names manually.  This will permit you to call
+-- 'findAssoc', but you still will not be able to use 'assocSelect'
+-- for more complex queries, since SQL does not permit joins between
+-- two tables with the same name.  The second option is to give one of
+-- the sides of the join table a row alias with 'As'.  For example:
+--
+-- > data ParentBar = ParentBar
+-- > instance RowAlias ParentBar where rowAliasName _ = "parent_bar"
+-- > 
+-- > selfJoinTable :: JoinTable Bar (As ParentBar Bar)
+-- > selfJoinTable = defaultJoinTable
+-- > 
+-- > selfJoin :: Association Bar (As ParentBar Bar)
+-- > selfJoin = jtAssoc selfJoinTable
 defaultJoinTable :: (Model a, Model b) => JoinTable a b
-defaultJoinTable = jti
+defaultJoinTable
+  | colA == colB = error "defaultJoinTable has default for self joins"
+  | otherwise = jti
   where a = modelInfo `gAsTypeOf2` jti
         b = modelInfo `gAsTypeOf1` jti
+        colA = S.intercalate "_"
+               [modelTable a, modelColumns a !! modelPrimaryColumn a]
+        colB = S.intercalate "_"
+               [modelTable b, modelColumns b !! modelPrimaryColumn b]
         jti = JoinTable {
             jtTable = S.intercalate "_" $ sort [modelTable a, modelTable b]
-          , jtColumnA = S.intercalate "_"
-                        [modelTable a, modelColumns a !! modelPrimaryColumn a]
-          , jtColumnB = S.intercalate "_"
-                        [modelTable b, modelColumns b !! modelPrimaryColumn b]
+          , jtColumnA = colA
+          , jtColumnB = colB
           }
 
 jtQTable :: JoinTable a b -> S.ByteString
@@ -351,10 +388,11 @@ jtQColumnA jt = S.concat [ jtQTable jt, ".", quoteIdent $ jtColumnA jt]
 jtQColumnB :: JoinTable a b -> S.ByteString
 jtQColumnB jt = S.concat [ jtQTable jt, ".", quoteIdent $ jtColumnB jt]
 
+-- | Flip a join table.  This doesn't change the name of the table (since the 
 jtFlip :: JoinTable a b -> JoinTable b a
 jtFlip jt = jt { jtColumnA = jtColumnB jt , jtColumnB = jtColumnA jt }
 
--- | A SQL statement suitable for adding a par to a join table.  Note
+-- | A SQL statement suitable for adding a pair to a join table.  Note
 -- that the statement takes two parameters (i.e., contains two @\'?\'@
 -- characters) corresponding to the primary keys of the two models
 -- being associated.  These parameters can be supplied by 'jtParam'.
@@ -366,6 +404,13 @@ jtAddStatement jt = Query $ S.concat [
   , jtQColumnA jt, ", ", jtQColumnB jt, " FROM ", quoteIdent $ jtTable jt
   ]
 
+-- | Add an association between two models to a join table.  Returns
+-- 'True' if the association was not already there.
+jtAdd :: (Model a, Model b) => JoinTable a b -> Connection -> a -> b -> IO Bool
+{-# INLINE jtAdd #-}
+jtAdd jt = \c a b -> (/= 0) <$> execute c q (jtParam jt a b)
+  where q = jtAddStatement jt
+
 -- | A SQL statement for removing a pair from a join table.  Like
 -- 'jtAddStatement', the query is parameterized by two primary keys.
 jtRemoveStatement :: JoinTable a b -> Query
@@ -373,6 +418,21 @@ jtRemoveStatement jt = Query $ S.concat [
     "DELETE FROM ", quoteIdent $ jtTable jt, " WHERE "
   , jtQColumnA jt, " = ? AND ", jtQColumnB jt, " = ?"
   ]
+
+-- | Remove an association from a join table.  Returns 'True' if the
+-- association was previously there.
+jtRemove :: (Model a, Model b) =>
+            JoinTable a b -> Connection -> a -> b -> IO Bool
+{-# INLINE jtRemove #-}
+jtRemove jt = \c a b -> (/= 0) <$> execute c q (jtParam jt a b)
+  where q = jtRemoveStatement jt
+
+-- | Remove an assocation from a join table when you don't have the
+-- target instances of the two models handy, but do have references.
+jtRemoveById :: (Model a, Model b) => JoinTable a b
+                -> Connection -> GDBRef rt a -> GDBRef rt b -> IO Bool
+jtRemoveById jt = \c a b -> (/= 0) <$> execute c q (a, b)
+  where q = jtRemoveStatement jt
 
 -- | Generate parameters for 'jtAddStatement' and 'jtRemoveStatement'.
 -- The returned list is suitable for use as a 'ToRow' instance.  For
@@ -389,7 +449,7 @@ jtAssoc jt = Association {
     assocSelect = dbJoin modelDBSelect "JOIN" onlyB $ Query $ S.concat [
        "ON ", priA, " = ", jtQColumnA jt]
   , assocSelectOnlyB = onlyB
-  , assocWhere = Query $ jtQColumnA jt <> " = ?"
+  , assocWhereQuery = Query $ jtQColumnA jt <> " = ?"
   , assocWhereParam = \a -> [toField $ primaryKey a]
   }
   where priA = modelQPrimaryColumn $ modelIdentifiers `gAsTypeOf2` jt
