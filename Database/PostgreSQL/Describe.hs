@@ -1,21 +1,18 @@
 {-# LANGUAGE OverloadedStrings #-}
 
--- | Describe a table in the database.  The function 'describeTable'
--- returns a list of 'ColumnInfo' structures describing a table in the
--- databaes.  Not all information about a table is returned.  In
--- particular, constraints that span keys are ignored.
+-- | Utility function for describing a table in the database.
 module Database.PostgreSQL.Describe (
   ColumnInfo(..), describeTable
   ) where
 
 import Control.Monad
-import Database.PostgreSQL.Simple
-import Database.PostgreSQL.Simple.TypeInfo
-import Database.PostgreSQL.Simple.Types
 import qualified Data.ByteString as S
 import Data.Int
 import qualified Data.Vector as V
 import qualified Database.PostgreSQL.Simple.TypeInfo.Static as PG
+import Database.PostgreSQL.Simple
+import Database.PostgreSQL.Simple.TypeInfo
+import Database.PostgreSQL.Simple.Types
 
 data ColumnInfo = ColumnInfo {
     colNum :: !Int16
@@ -30,9 +27,9 @@ data ColumnInfo = ColumnInfo {
     -- ^ If 'True', the database cannot contain null.  (This
     -- constraint should always be accurate.)
   , colPrimary :: !Bool
-    -- ^ x 'True' if this column (and only this column) constitutes
-    -- the primary key of the table.  Always 'False' if the primary
-    -- key comprises multiple columns (even if this is one of those
+    -- ^ 'True' if this column (and only this column) constitutes the
+    -- primary key of the table.  Always 'False' if the primary key
+    -- comprises multiple columns (even if this is one of those
     -- columns).
   , colUnique :: !Bool
     -- ^ 'True' if there is a uniqueness constraint on this column.
@@ -56,7 +53,10 @@ defColInfo = ColumnInfo {
   , colReferences = Nothing
   }
 
-describeTable :: Connection -> String -> IO [ColumnInfo]
+-- | Returns a list of 'ColumnInfo' structures for a particular table.
+-- Not all information about a table is returned.  In particular,
+-- constraints that span columns are ignored.
+describeTable :: Connection -> S.ByteString -> IO [ColumnInfo]
 describeTable cn t = do
   [(Only tbloid)] <- query cn "select oid from pg_class where relname = ?"
                      (Only t)

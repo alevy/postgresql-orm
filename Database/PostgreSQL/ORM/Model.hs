@@ -29,6 +29,7 @@ module Database.PostgreSQL.ORM.Model (
     , defaultModelInsertQuery, defaultModelDeleteQuery
       -- * Helper functions and miscellaneous internals
     , quoteIdent, NormalRef(..), UniqueRef(..)
+    , ModelCreateInfo(..), emptyModelCreateInfo
     , defaultFromRow, defaultToRow
     , printq
       -- ** Helper classes
@@ -523,6 +524,22 @@ defaultModelQueries mi = ModelQueries {
   , modelDeleteQuery = defaultModelDeleteQuery mi
   }
 
+-- | Extra information for "Database.PostgreSQL.ORM.CreateTable".  You
+-- probably don't need to use this.
+data ModelCreateInfo a = ModelCreateInfo {
+    modelCreateColumnTypeExceptions :: ![(S.ByteString, S.ByteString)]
+    -- ^ A list of (column-name, type) pairs for which you want to
+    -- override the default.
+  , modelCreateExtraConstraints :: !S.ByteString
+    -- ^ Extra constraints to stick at the end of the @CREATE TABLE@
+    -- statement.
+  } deriving (Show)
+
+emptyModelCreateInfo :: ModelCreateInfo a
+emptyModelCreateInfo = ModelCreateInfo {
+    modelCreateColumnTypeExceptions = []
+  , modelCreateExtraConstraints = S.empty
+  }
 
 -- | The class of data types that represent a database table.  This
 -- class conveys information necessary to move a Haskell data
@@ -661,6 +678,10 @@ class Model a where
   {-# INLINE modelQueries #-}
   modelQueries = defaultModelQueries modelIdentifiers
 
+  -- | Extra constraints, if any, to place in a @CREATE TABLE@
+  -- statement.  Only used by "Database.PostgreSQL.ORM.CreateTable".
+  modelCreateInfo :: ModelCreateInfo a
+  modelCreateInfo = emptyModelCreateInfo
 
 joinModelIdentifiers :: (Model a, Model b) => ModelIdentifiers (a :. b)
 joinModelIdentifiers = r
@@ -709,7 +730,7 @@ instance (Datatype c, GUnitType f) => GUnitType (D1 c f) where
 -- a concrete instance of the type.  This is provided by the
 -- 'rowAliasName' method (which must be non-strict).
 class RowAlias a where
-  rowAliasName :: As a row -> S.ByteString
+  rowAliasName :: g a row -> S.ByteString
   -- ^ Return the SQL identifier for the row alias.  This method must
   -- be non-strict in its argument.  Hence, it should discard the
   -- argument and return the name of the alias.  For example:
