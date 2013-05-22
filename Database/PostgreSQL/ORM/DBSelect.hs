@@ -237,11 +237,14 @@ setLimit i dbs = dbs { selLimit = fmtSql "LIMIT ?" (Only i) }
 setOffset :: DBSelect a -> Int -> DBSelect a
 setOffset dbs i = dbs { selOffset = fmtSql "OFFSET ?" (Only i) }
 
--- | Add one or more comma-separated expressions to 'selFrom' that
+-- | Add one or more comma-separated expressions to 'selFields' that
 -- produce column values without any corresponding relation in the
 -- @FROM@ clause.  Type @r@ is the type into which the expression is
--- to be parsed.  For example, to rank results by the field @value@
--- and compute the fraction of overall value they contribute:
+-- to be parsed.  Generally this will be an instance of 'FromRow' that
+-- is a degenerate model (e.g., 'Only', or a tuple).
+--
+-- For example, to rank results by the field @value@ and compute the
+-- fraction of overall value they contribute:
 --
 -- > r <- dbSelect c $ addExpression
 -- >        "rank() OVER (ORDER BY value), value::float4/SUM(value) OVER ()"
