@@ -205,8 +205,10 @@ addWhere q p dbs
   }
   where clause = mconcat [fromChar '(', buildSql q p, fromChar ')']
 
--- | Set the @ORDER BY@ clause of a 'DBSelect'.  Note that unlike
--- @addWhere@, the 'Query' /must/ contain the @ORDER BY@ keywords.
+-- | Set the @ORDER BY@ clause of a 'DBSelect'.  Example:
+--
+-- > dbSelect c $ setOrderBy "\"employeeName\" DESC NULLS FIRST" $
+--                  modelDBSelect
 setOrderBy :: Query -> DBSelect a -> DBSelect a
 setOrderBy (Query ob) dbs = dbs { selOrderBy = Query $ "ORDER BY " <> ob }
 

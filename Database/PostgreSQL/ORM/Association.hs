@@ -108,7 +108,7 @@ assocWhere :: (Model b) => Association a b -> a -> DBSelect b
 assocWhere ab a = addWhere (assocWhereQuery ab) (assocWhereParam ab a)
                   (assocSelectOnlyB ab)
 
--- | Follow an association to return all all of the @b@s associated
+-- | Follow an association to return all of the @b@s associated
 -- with a particular @a@.  The behavior is similar to:
 --
 -- > findAssoc' ab c a = dbSelect c $ assocWhere ab a

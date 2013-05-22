@@ -35,7 +35,7 @@ data ColumnInfo = ColumnInfo {
     -- ^ 'True' if there is a uniqueness constraint on this column.
     -- Not 'True' if this column is part of a uniqueness constraint
     -- involving multiple columns.  (Such multi-column uniqueness
-    -- consraints are not reported by this interface.)
+    -- constraints are not reported by this interface.)
   , colReferences :: !(Maybe S.ByteString)
     -- ^ If this there is a foreign key constraint on this column (and
     -- the constraint does not span multiple columns), report the
