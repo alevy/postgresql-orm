@@ -4,6 +4,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE CPP #-}
 
 module Database.PostgreSQL.ORM.Model (
       -- * The Model class
@@ -682,6 +683,29 @@ class Model a where
   -- statement.  Only used by "Database.PostgreSQL.ORM.CreateTable".
   modelCreateInfo :: ModelCreateInfo a
   modelCreateInfo = emptyModelCreateInfo
+
+-- | Degemerate instances of 'Model' for types in the 'ToRow' class
+-- are to enable extra 'ToRow' types to be included with ':.' in the
+-- result of 'dbSelect' queries.
+#define DEGEN_ERR error "Attempt to use degenrate ToRow instance as Model"
+#define DEGENERATE(ctx,t)             \
+instance ctx => Model t where         \
+  modelInfo = DEGEN_ERR;              \
+  modelIdentifiers = DEGEN_ERR;       \
+  modelRead = fromRow;                \
+  modelWrite = DEGEN_ERR;             \
+  modelCreateInfo = DEGEN_ERR;
+
+DEGENERATE(FromField t, (Only t))
+DEGENERATE(FromField t, [t])
+DEGENERATE((FromField a, FromField b), (a, b))
+DEGENERATE((FromField a, FromField b, FromField c), (a, b, c))
+DEGENERATE((FromField a, FromField b, FromField c, FromField d), (a, b, c, d))
+DEGENERATE((FromField a, FromField b, FromField c, FromField d, FromField e), 
+           (a, b, c, d, e))
+
+#undef DEGEN_ERR
+#undef DEGENERATE
 
 joinModelIdentifiers :: (Model a, Model b) => ModelIdentifiers (a :. b)
 joinModelIdentifiers = r
