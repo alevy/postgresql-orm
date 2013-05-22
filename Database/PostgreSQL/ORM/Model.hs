@@ -687,14 +687,15 @@ class Model a where
 -- | Degemerate instances of 'Model' for types in the 'ToRow' class
 -- are to enable extra 'ToRow' types to be included with ':.' in the
 -- result of 'dbSelect' queries.
-#define DEGEN_ERR error "Attempt to use degenrate ToRow instance as Model"
+degen_err :: a
+degen_err = error "Attempt to use degenrate ToRow instance as Model"
 #define DEGENERATE(ctx,t)             \
 instance ctx => Model t where         \
-  modelInfo = DEGEN_ERR;              \
-  modelIdentifiers = DEGEN_ERR;       \
+  modelInfo = degen_err;              \
+  modelIdentifiers = degen_err;       \
   modelRead = fromRow;                \
-  modelWrite = DEGEN_ERR;             \
-  modelCreateInfo = DEGEN_ERR;
+  modelWrite _ = degen_err;           \
+  modelCreateInfo = degen_err;
 
 DEGENERATE(FromField t, (Only t))
 DEGENERATE(FromField t, [t])
