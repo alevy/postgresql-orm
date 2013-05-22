@@ -11,13 +11,13 @@ module Database.PostgreSQL.ORM.DBSelect (
   , dbSelectParams, dbSelect
   , renderDBSelect, buildDBSelect
     -- * Creating DBSelects
-  , emptyDBSelect
+  , emptyDBSelect, expressionDBSelect
   , modelDBSelect
   , dbJoin, dbJoinModels
   , dbProject, dbProject'
   , dbNest, dbChain
     -- * Altering DBSelects
-  , addWhere_, addWhere, setOrderBy, setLimit, setOffset
+  , addWhere_, addWhere, setOrderBy, setLimit, setOffset, addExpression
   ) where
 
 import Blaze.ByteString.Builder
@@ -79,6 +79,10 @@ data FromClause = FromModel {
   , fcCanonical :: !S.ByteString
   }
   deriving Show
+
+nullFrom :: FromClause -> Bool
+nullFrom (FromModel q _) | qNull q = True
+nullFrom _                         = False
 
 -- | A deconstructed SQL select statement that allows easier
 -- manipulation of individual terms.  Several functions are provided
@@ -154,6 +158,21 @@ instance (GDBS f) => GDBS (M1 i c f) where
 emptyDBSelect :: DBSelect a
 emptyDBSelect = (to gdbsDefault) { selSelectKeyword = fromString "SELECT" }
 
+-- | A 'DBSelect' for one or more comma-separated expressions, rather
+-- than for a table.  For example, to issue the query @\"SELECT
+-- lastval()\"@:
+--
+-- > lastval :: DBSelect (Only DBKeyType)
+-- > lastval = expressionDBSelect "lastval ()"
+-- >
+-- >   ...
+-- >   [just_inserted_id] <- dbSelect conn lastval
+--
+-- On the other hand, for such a simple expression, you might as well
+-- call 'query_' directly.
+expressionDBSelect :: (Model r) => Query -> DBSelect r
+expressionDBSelect q = emptyDBSelect { selFields = q }
+
 -- | Create a 'Builder' for a rendered version of a 'DBSelect'.  This
 -- can save one string copy if you want to embed one query inside
 -- another as a subquery, as done by `dbProject'`, and thus need to
@@ -218,6 +237,22 @@ setLimit i dbs = dbs { selLimit = fmtSql "LIMIT ?" (Only i) }
 setOffset :: DBSelect a -> Int -> DBSelect a
 setOffset dbs i = dbs { selOffset = fmtSql "OFFSET ?" (Only i) }
 
+-- | Add one or more comma-separated expressions to 'selFrom' that
+-- produce column values without any corresponding relation in the
+-- @FROM@ clause.  Type @r@ is the type into which the expression is
+-- to be parsed.  For example, to rank results by the field @value@
+-- and compute the fraction of overall value they contribute:
+--
+-- > r <- dbSelect c $ addExpression
+-- >        "rank() OVER (ORDER BY value), value::float4/SUM(value) OVER ()"
+-- >        modelDBSelect
+-- >          :: IO [Bar :. (Int, Double)]
+addExpression :: (Model r) => Query -> DBSelect a -> DBSelect (a :. r)
+addExpression q dbs = dbs {
+  selFields = if qNull $ selFields dbs then q
+              else Query $ S.concat $ map fromQuery [selFields dbs, ", ", q]
+  }
+
 -- | A 'DBSelect' that returns all rows of a model.
 modelDBSelect :: (Model a) => DBSelect a
 modelDBSelect = r
@@ -259,11 +294,14 @@ dbJoin :: (Model a, Model b) =>
 dbJoin left joinOp right onClause = addWhere_ (selWhere left) right {
     selFields = Query $ S.concat [fromQuery $ selFields left, ", ",
                                   fromQuery $ selFields right]
-  , selFrom = FromJoin (selFrom left) joinOp (selFrom right) onClause
-              (modelQTable idab)
+  , selFrom = newfrom
   }
   where idab = modelIdentifiers `gAsTypeOf`
                (undefined :: g a -> g b -> a :. b) left right
+        newfrom | nullFrom $ selFrom right = selFrom left
+                | nullFrom $ selFrom left = selFrom right
+                | otherwise = FromJoin (selFrom left) joinOp (selFrom right)
+                              onClause (modelQTable idab)
 
 -- | A version of 'dbJoin' that uses 'modelDBSelect' for the joined
 -- tables.

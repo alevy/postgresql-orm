@@ -776,12 +776,10 @@ class RowAlias a where
   -- default converts the first character of the typename to
   -- lower-case, following the logic of 'defaultModelTable'.
   default rowAliasName :: (Generic a, GUnitType (Rep a)) =>
-                          As a row -> S.ByteString
-  rowAliasName as = fromString $ caseFold $ gUnitTypeName . from $ fixtype as
-    where fixtype :: As a row -> a
-          fixtype _ = undefined
-          caseFold (h:t) = toLower h:t
-          caseFold []     = []
+                          g a row -> S.ByteString
+  rowAliasName as = fromString $ caseFold $ gUnitTypeName . from $ undef2 as
+    where caseFold (h:t) = toLower h:t -- fold first character only
+          caseFold []    = []
 
 -- | The newtype @As@ can be wrapped around an existing type to give
 -- it a table name alias in a query.  This is necessary when a model

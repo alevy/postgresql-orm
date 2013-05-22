@@ -176,3 +176,18 @@ quizog = Quizog { qId = NullKey
                 , qEd = "Q.E.D."
                 }
 
+
+dumbdbs :: DBSelect (Only Int)
+dumbdbs = expressionDBSelect "1 + 1"
+
+postdbs :: DBSelect Post
+postdbs = modelDBSelect
+
+lastval :: DBSelect (Only DBKeyType)
+lastval = expressionDBSelect "lastval ()"
+
+rankFraction :: DBSelect (Int, Maybe Double)
+rankFraction = expressionDBSelect
+   "rank() OVER (ORDER BY none), none::float4/SUM(none) OVER () AS fraction"
+bardbs :: DBSelect Bar
+bardbs = modelDBSelect
