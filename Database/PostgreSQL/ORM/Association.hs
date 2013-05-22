@@ -11,7 +11,7 @@ module Database.PostgreSQL.ORM.Association (
     -- * Join table Associations
   , JoinTable(..), defaultJoinTable, jtAssocs, joinTable
     -- ** Operations on join tables
-  , jtAdd, jtRemove, jtRemoveById
+  , jtAdd, jtRemove, jtRemoveByRef
     -- ** Semi-internal join table functions
   , jtAddStatement, jtRemoveStatement, jtParam
   , jtFlip, jtAssoc
@@ -475,9 +475,9 @@ jtRemove jt = \c a b -> (/= 0) <$> execute c q (jtParam jt a b)
 
 -- | Remove an assocation from a join table when you don't have the
 -- target instances of the two models handy, but do have references.
-jtRemoveById :: (Model a, Model b) => JoinTable a b
-                -> Connection -> GDBRef rt a -> GDBRef rt b -> IO Bool
-jtRemoveById jt = \c a b -> (/= 0) <$> execute c q (a, b)
+jtRemoveByRef :: (Model a, Model b) => JoinTable a b
+                 -> Connection -> GDBRef rt a -> GDBRef rt b -> IO Bool
+jtRemoveByRef jt = \c a b -> (/= 0) <$> execute c q (a, b)
   where q = jtRemoveStatement jt
 
 -- | Generate parameters for 'jtAddStatement' and 'jtRemoveStatement'.
