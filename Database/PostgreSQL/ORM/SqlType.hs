@@ -6,7 +6,6 @@ module Database.PostgreSQL.ORM.SqlType (SqlType(..), getTypeOid) where
 
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Lazy as L
-import Data.Functor
 import Data.Int
 import Data.Monoid
 import qualified Data.Text as ST
@@ -32,8 +31,8 @@ instance FromField ExtractTypeOid where
 -- use the 'Oid' to call 'getTypeInfo' for more informaiton on the
 -- type.
 getTypeOid :: Connection -> S.ByteString -> IO Oid
-getTypeOid c name = do
-  [Only (ExtractTypeOid ti)] <- query_ c $ Query $ "SELECT NULL :: " <> name
+getTypeOid c tname = do
+  [Only (ExtractTypeOid ti)] <- query_ c $ Query $ "SELECT NULL :: " <> tname
   return ti
 
 -- | The class of Haskell types that can be converted to and from a
