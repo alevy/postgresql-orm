@@ -227,7 +227,7 @@ addWhere q p dbs
 -- | Set the @ORDER BY@ clause of a 'DBSelect'.  Example:
 --
 -- > dbSelect c $ setOrderBy "\"employeeName\" DESC NULLS FIRST" $
---                  modelDBSelect
+-- >                modelDBSelect
 setOrderBy :: Query -> DBSelect a -> DBSelect a
 setOrderBy (Query ob) dbs = dbs { selOrderBy = Query $ "ORDER BY " <> ob }
 
