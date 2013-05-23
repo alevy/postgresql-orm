@@ -119,7 +119,8 @@ findAssoc :: (Model b) => Association a b -> Connection -> a -> IO [b]
 {-# INLINE findAssoc #-}
 findAssoc assoc = \c a ->
   map lookupRow <$> query c q (assocWhereParam assoc a)
-  where q = renderDBSelect $
+  where {-# NOINLINE q #-}
+        q = renderDBSelect $
             addWhere_ (assocWhereQuery assoc) $ assocSelectOnlyB assoc
 
 -- | Combine two associations into one.
@@ -455,7 +456,8 @@ jtAddStatement jt = Query $ S.concat [
 jtAdd :: (Model a, Model b) => JoinTable a b -> Connection -> a -> b -> IO Bool
 {-# INLINE jtAdd #-}
 jtAdd jt = \c a b -> (/= 0) <$> execute c q (jtParam jt a b)
-  where q = jtAddStatement jt
+  where {-# NOINLINE q #-}
+        q = jtAddStatement jt
 
 -- | A SQL statement for removing a pair from a join table.  Like
 -- 'jtAddStatement', the query is parameterized by two primary keys.
@@ -471,14 +473,17 @@ jtRemove :: (Model a, Model b) =>
             JoinTable a b -> Connection -> a -> b -> IO Bool
 {-# INLINE jtRemove #-}
 jtRemove jt = \c a b -> (/= 0) <$> execute c q (jtParam jt a b)
-  where q = jtRemoveStatement jt
+  where {-# NOINLINE q #-}
+        q = jtRemoveStatement jt
 
 -- | Remove an assocation from a join table when you don't have the
 -- target instances of the two models handy, but do have references.
 jtRemoveById :: (Model a, Model b) => JoinTable a b
                 -> Connection -> GDBRef rt a -> GDBRef rt b -> IO Bool
+{-# INLINE jtRemoveById #-}
 jtRemoveById jt = \c a b -> (/= 0) <$> execute c q (a, b)
-  where q = jtRemoveStatement jt
+  where {-# NOINLINE q #-}
+        q = jtRemoveStatement jt
 
 -- | Generate parameters for 'jtAddStatement' and 'jtRemoveStatement'.
 -- The returned list is suitable for use as a 'ToRow' instance.  For

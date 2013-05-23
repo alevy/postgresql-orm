@@ -275,13 +275,15 @@ modelDBSelect = r
 dbSelectParams :: (Model a, ToRow p) => DBSelect a -> Connection -> p -> IO [a]
 {-# INLINE dbSelectParams #-}
 dbSelectParams dbs = \c p -> map lookupRow <$> query c q p
-  where q = renderDBSelect dbs
+  where {-# NOINLINE q #-}
+        q = renderDBSelect dbs
 
 -- | Run a 'DBSelect' query and return the resulting models.
 dbSelect :: (Model a) => Connection -> DBSelect a -> IO [a]
 {-# INLINE dbSelect #-}
 dbSelect c dbs = map lookupRow <$> query_ c q
-  where q = renderDBSelect dbs
+  where {-# NOINLINE q #-}
+        q = renderDBSelect dbs
 
 -- | Create a join of the 'selFields', 'selFrom', 'selJoins', and
 -- 'selWhere' clauses of two 'DBSelect' queries.  Other fields are
