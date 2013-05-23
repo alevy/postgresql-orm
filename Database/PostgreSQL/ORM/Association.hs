@@ -11,7 +11,7 @@ module Database.PostgreSQL.ORM.Association (
     -- * Join table Associations
   , JoinTable(..), defaultJoinTable, jtAssocs, joinTable
     -- ** Operations on join tables
-  , jtAdd, jtRemove, jtRemoveById
+  , jtAdd, jtRemove, jtRemoveByRef
     -- ** Semi-internal join table functions
   , jtAddStatement, jtRemoveStatement, jtParam
   , jtFlip, jtAssoc
@@ -108,7 +108,7 @@ assocWhere :: (Model b) => Association a b -> a -> DBSelect b
 assocWhere ab a = addWhere (assocWhereQuery ab) (assocWhereParam ab a)
                   (assocSelectOnlyB ab)
 
--- | Follow an association to return all all of the @b@s associated
+-- | Follow an association to return all of the @b@s associated
 -- with a particular @a@.  The behavior is similar to:
 --
 -- > findAssoc' ab c a = dbSelect c $ assocWhere ab a
@@ -478,10 +478,10 @@ jtRemove jt = \c a b -> (/= 0) <$> execute c q (jtParam jt a b)
 
 -- | Remove an assocation from a join table when you don't have the
 -- target instances of the two models handy, but do have references.
-jtRemoveById :: (Model a, Model b) => JoinTable a b
-                -> Connection -> GDBRef rt a -> GDBRef rt b -> IO Bool
-{-# INLINE jtRemoveById #-}
-jtRemoveById jt = \c a b -> (/= 0) <$> execute c q (a, b)
+jtRemoveByRef :: (Model a, Model b) => JoinTable a b
+                 -> Connection -> GDBRef rt a -> GDBRef rt b -> IO Bool
+{-# INLINE jtRemoveByRef #-}
+jtRemoveByRef jt = \c a b -> (/= 0) <$> execute c q (a, b)
   where {-# NOINLINE q #-}
         q = jtRemoveStatement jt
 

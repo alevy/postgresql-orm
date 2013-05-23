@@ -15,7 +15,7 @@ module Database.PostgreSQL.ORM (
   -- ** Parent-child associations
   , GDBRefInfo(..), DBRefInfo, defaultDBRefInfo, dbrefAssocs, has, belongsTo
   -- ** Join table associations
-  , JoinTable(..), defaultJoinTable, jtAssocs, jtAdd, jtRemove, jtRemoveById
+  , JoinTable(..), defaultJoinTable, jtAssocs, jtAdd, jtRemove, jtRemoveByRef
   -- ** Chaining associations
   , nestAssoc, chainAssoc
   ) where
