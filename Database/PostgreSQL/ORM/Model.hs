@@ -57,6 +57,7 @@ import Database.PostgreSQL.Simple.FromRow
 import Database.PostgreSQL.Simple.ToField
 import Database.PostgreSQL.Simple.ToRow
 import Database.PostgreSQL.Simple.Types
+import Database.PostgreSQL.ORM.Validations
 import GHC.Generics
 
 import Data.AsTypeOf
@@ -685,6 +686,8 @@ class Model a where
   modelCreateInfo :: ModelCreateInfo a
   modelCreateInfo = emptyModelCreateInfo
 
+  modelValid :: a -> [InvalidError]
+  modelValid = const []
 
 -- | Degemerate instances of 'Model' for types in the 'ToRow' class
 -- are to enable extra 'ToRow' types to be included with ':.' in the
@@ -935,14 +938,16 @@ findRow c k = liftIO action
 -- from the database, and returned with its primary key filled in.  If
 -- the primary key is not 'NullKey', then the 'Model' is writen with
 -- an @UPDATE@ query and returned as-is.
-save :: (MonadIO m, Model r) => Connection -> r -> m r
-save c r | NullKey <- primaryKey r = liftIO $ do
+save :: (MonadIO m, Model r)
+     => Connection -> r -> m (Either r [InvalidError])
+save c r | not . null $ modelValid r = return . Right $ modelValid r
+         | NullKey <- primaryKey r = liftIO $ do
                rs <- query c (modelInsertQuery qs) (InsertRow r)
-               case rs of [r'] -> return $ lookupRow r'
+               case rs of [r'] -> return . Left $ lookupRow r'
                           _    -> fail "save: database did not return row"
          | otherwise = liftIO $ do
                n <- execute c (modelUpdateQuery qs) (UpdateRow r)
-               case n of 1 -> return r
+               case n of 1 -> return $ Left r
                          _ -> fail $ "save: database updated " ++ show n
                                      ++ " records"
   where qs = modelQueries `gAsTypeOf` r

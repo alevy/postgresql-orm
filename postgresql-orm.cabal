@@ -24,6 +24,7 @@ library
                , directory
                , filepath
                , ghc-prim
+               , ListLike
                , postgresql-simple
                , process
                , text
@@ -45,6 +46,7 @@ library
                  , Database.PostgreSQL.ORM.DBSelect
                  , Database.PostgreSQL.ORM.Model
                  , Database.PostgreSQL.ORM.SqlType
+                 , Database.PostgreSQL.ORM.Validations
   other-extensions: FlexibleContexts
                   , FlexibleInstances
                   , FunctionalDependencies

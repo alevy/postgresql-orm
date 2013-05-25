@@ -1,7 +1,7 @@
 
 module Database.PostgreSQL.ORM (
   -- * The Model class and related types
-    Model(modelInfo), ModelInfo(..)
+    Model(modelInfo, modelValid), ModelInfo(..)
   , defaultModelInfo, underscoreModelInfo
   , DBKey(..), DBRef, DBRefUnique, mkDBRef
   , (:.), As(..), RowAlias(..), fromAs
@@ -18,9 +18,12 @@ module Database.PostgreSQL.ORM (
   , JoinTable(..), defaultJoinTable, jtAssocs, jtAdd, jtRemove, jtRemoveByRef
   -- ** Chaining associations
   , nestAssoc, chainAssoc
+  -- ** Validations
+  , InvalidError(..), validate, validateLength, validateNotEmpty
   ) where
 
 import Database.PostgreSQL.ORM.Model
 import Database.PostgreSQL.ORM.DBSelect
 import Database.PostgreSQL.ORM.Association
+import Database.PostgreSQL.ORM.Validations
 import Database.PostgreSQL.Simple ((:.))
