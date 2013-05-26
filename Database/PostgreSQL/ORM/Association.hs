@@ -20,7 +20,6 @@ module Database.PostgreSQL.ORM.Association (
   ) where
 
 import Control.Applicative
-import Control.Monad.IO.Class
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Char8 as S8
 import Data.List
@@ -116,9 +115,9 @@ assocWhere ab a = addWhere (assocWhereQuery ab) (assocWhereParam ab a)
 --
 -- But if the first argument is a static association, this function
 -- may be marginally faster because it pre-renders most of the query.
-findAssoc :: (MonadIO m, Model b) => Association a b -> Connection -> a -> m [b]
+findAssoc :: (Model b) => Association a b -> Connection -> a -> IO [b]
 {-# INLINE findAssoc #-}
-findAssoc assoc = \c a -> liftIO $
+findAssoc assoc = \c a ->
   map lookupRow <$> query c q (assocWhereParam assoc a)
   where {-# NOINLINE q #-}
         q = renderDBSelect $
@@ -454,10 +453,9 @@ jtAddStatement jt = Query $ S.concat [
 
 -- | Add an association between two models to a join table.  Returns
 -- 'True' if the association was not already there.
-jtAdd :: (MonadIO m, Model a, Model b)
-      => JoinTable a b -> Connection -> a -> b -> m Bool
+jtAdd :: (Model a, Model b) => JoinTable a b -> Connection -> a -> b -> IO Bool
 {-# INLINE jtAdd #-}
-jtAdd jt = \c a b -> liftIO $ (/= 0) <$> execute c q (jtParam jt a b)
+jtAdd jt = \c a b -> (/= 0) <$> execute c q (jtParam jt a b)
   where {-# NOINLINE q #-}
         q = jtAddStatement jt
 
@@ -471,19 +469,19 @@ jtRemoveStatement jt = Query $ S.concat [
 
 -- | Remove an association from a join table.  Returns 'True' if the
 -- association was previously there.
-jtRemove :: (MonadIO m, Model a, Model b) =>
-            JoinTable a b -> Connection -> a -> b -> m Bool
+jtRemove :: (Model a, Model b) =>
+            JoinTable a b -> Connection -> a -> b -> IO Bool
 {-# INLINE jtRemove #-}
-jtRemove jt = \c a b -> liftIO $ (/= 0) <$> execute c q (jtParam jt a b)
+jtRemove jt = \c a b -> (/= 0) <$> execute c q (jtParam jt a b)
   where {-# NOINLINE q #-}
         q = jtRemoveStatement jt
 
 -- | Remove an assocation from a join table when you don't have the
 -- target instances of the two models handy, but do have references.
-jtRemoveByRef :: (MonadIO m, Model a, Model b) => JoinTable a b
-                 -> Connection -> GDBRef rt a -> GDBRef rt b -> m Bool
+jtRemoveByRef :: (Model a, Model b) => JoinTable a b
+                 -> Connection -> GDBRef rt a -> GDBRef rt b -> IO Bool
 {-# INLINE jtRemoveByRef #-}
-jtRemoveByRef jt = \c a b -> liftIO $ (/= 0) <$> execute c q (a, b)
+jtRemoveByRef jt = \c a b -> (/= 0) <$> execute c q (a, b)
   where {-# NOINLINE q #-}
         q = jtRemoveStatement jt
 

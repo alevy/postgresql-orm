@@ -41,7 +41,6 @@ module Database.PostgreSQL.ORM.Model (
 
 import Control.Applicative
 import Control.Monad
-import Control.Monad.IO.Class
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Char8 as S8
 import Data.Char
@@ -918,16 +917,16 @@ instance (Model a) => ToRow (UpdateRow a) where
 --
 -- Note that unlike the other primary model operations, it is okay to
 -- call 'findAll' even on degenerate models such as 'As' and ':.'.
-findAll :: (MonadIO m, Model r) => Connection -> m [r]
-findAll c = liftIO action
+findAll :: (Model r) => Connection -> IO [r]
+findAll c = action
   where mi = modelIdentifiers `gAsTypeOf1_1` action
         q = Query $ modelSelectFragment mi
         action = map lookupRow <$> query_ c q
 
 -- | Follow a 'DBRef' or 'DBRefUnique' and fetch the target row from
 -- the database into a 'Model' type @r@.
-findRow :: (MonadIO m, Model r) => Connection -> GDBRef rt r -> m (Maybe r)
-findRow c k = liftIO action
+findRow :: (Model r) => Connection -> GDBRef rt r -> IO (Maybe r)
+findRow c k = action
   where qs = modelQueries `gAsTypeOf1_1` action
         action = do rs <- query c (modelLookupQuery qs) (Only k)
                     case rs of [r] -> return $ Just $ lookupRow $ r
@@ -938,14 +937,14 @@ findRow c k = liftIO action
 -- from the database, and returned with its primary key filled in.  If
 -- the primary key is not 'NullKey', then the 'Model' is writen with
 -- an @UPDATE@ query and returned as-is.
-save :: (MonadIO m, Model r)
-     => Connection -> r -> m (Either r [InvalidError])
+save :: (Model r)
+     => Connection -> r -> IO (Either r [InvalidError])
 save c r | not . null $ modelValid r = return . Right $ modelValid r
-         | NullKey <- primaryKey r = liftIO $ do
+         | NullKey <- primaryKey r = do
                rs <- query c (modelInsertQuery qs) (InsertRow r)
                case rs of [r'] -> return . Left $ lookupRow r'
                           _    -> fail "save: database did not return row"
-         | otherwise = liftIO $ do
+         | otherwise = do
                n <- execute c (modelUpdateQuery qs) (UpdateRow r)
                case n of 1 -> return $ Left r
                          _ -> fail $ "save: database updated " ++ show n
@@ -956,17 +955,17 @@ save c r | not . null $ modelValid r = return . Right $ modelValid r
 -- the database.  This function only looks at the primary key in the
 -- data structure.  It is an error to call this function if the
 -- primary key is not set.
-destroy :: (MonadIO m, Model a) => Connection -> a -> m ()
-destroy c a = liftIO $
+destroy :: (Model a) => Connection -> a -> IO ()
+destroy c a =
   case primaryKey a of
     NullKey -> fail "destroy: NullKey"
     DBKey k -> void $ execute c
                (modelDeleteQuery $ modelQueries `gAsTypeOf` a) (Only k)
 
 -- | Remove a row from the database without fetching it first.
-destroyByRef :: (MonadIO m, Model a) => Connection -> GDBRef rt a -> m ()
-destroyByRef c a = liftIO . void $
-  execute c (modelDeleteQuery $ modelQueries `gAsTypeOf1` a) (Only a)
+destroyByRef :: (Model a) => Connection -> GDBRef rt a -> IO ()
+destroyByRef c a =
+  void $ execute c (modelDeleteQuery $ modelQueries `gAsTypeOf1` a) (Only a)
 
 printq :: Query -> IO ()
 printq (Query bs) = S8.putStrLn bs

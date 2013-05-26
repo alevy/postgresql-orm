@@ -6,7 +6,7 @@ module Database.PostgreSQL.ORM (
   , DBKey(..), DBRef, DBRefUnique, mkDBRef
   , (:.), As(..), RowAlias(..), fromAs
   -- ** Single-row operations
-  , findRow, findAll, save, destroy, destroyByRef
+  , findRow, save, destroy, destroyByRef
   -- * Abstracted select queries
   , DBSelect(..), modelDBSelect, dbSelectParams, dbSelect
   , addWhere_, addWhere, setOrderBy, setLimit, setOffset

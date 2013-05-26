@@ -22,7 +22,6 @@ module Database.PostgreSQL.ORM.DBSelect (
 
 import Blaze.ByteString.Builder
 import Blaze.ByteString.Builder.Char.Utf8 (fromChar)
-import Control.Monad.IO.Class
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Char8 as S8
 import Data.Functor
@@ -237,8 +236,8 @@ setLimit :: Int -> DBSelect a -> DBSelect a
 setLimit i dbs = dbs { selLimit = fmtSql "LIMIT ?" (Only i) }
 
 -- | Set the @OFFSET@ clause of a 'DBSelect'.
-setOffset :: Int -> DBSelect a -> DBSelect a
-setOffset i dbs = dbs { selOffset = fmtSql "OFFSET ?" (Only i) }
+setOffset :: DBSelect a -> Int -> DBSelect a
+setOffset dbs i = dbs { selOffset = fmtSql "OFFSET ?" (Only i) }
 
 -- | Add one or more comma-separated expressions to 'selFields' that
 -- produce column values without any corresponding relation in the
@@ -275,17 +274,16 @@ modelDBSelect = r
 -- and the parameters supplied later.  Hence, you should use this
 -- version when the 'DBSelect' is static.  For dynamically modified
 -- 'DBSelect' structures, you may prefer 'dbSelect'.
-dbSelectParams :: (MonadIO m, Model a, ToRow p)
-               => DBSelect a -> Connection -> p -> m [a]
+dbSelectParams :: (Model a, ToRow p) => DBSelect a -> Connection -> p -> IO [a]
 {-# INLINE dbSelectParams #-}
-dbSelectParams dbs = \c p -> liftIO $ map lookupRow <$> query c q p
+dbSelectParams dbs = \c p -> map lookupRow <$> query c q p
   where {-# NOINLINE q #-}
         q = renderDBSelect dbs
 
 -- | Run a 'DBSelect' query and return the resulting models.
-dbSelect :: (MonadIO m, Model a) => Connection -> DBSelect a -> m [a]
+dbSelect :: (Model a) => Connection -> DBSelect a -> IO [a]
 {-# INLINE dbSelect #-}
-dbSelect c dbs = liftIO $ map lookupRow <$> query_ c q
+dbSelect c dbs = map lookupRow <$> query_ c q
   where {-# NOINLINE q #-}
         q = renderDBSelect dbs
 
