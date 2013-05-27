@@ -236,8 +236,8 @@ setLimit :: Int -> DBSelect a -> DBSelect a
 setLimit i dbs = dbs { selLimit = fmtSql "LIMIT ?" (Only i) }
 
 -- | Set the @OFFSET@ clause of a 'DBSelect'.
-setOffset :: DBSelect a -> Int -> DBSelect a
-setOffset dbs i = dbs { selOffset = fmtSql "OFFSET ?" (Only i) }
+setOffset :: Int -> DBSelect a -> DBSelect a
+setOffset i dbs = dbs { selOffset = fmtSql "OFFSET ?" (Only i) }
 
 -- | Add one or more comma-separated expressions to 'selFields' that
 -- produce column values without any corresponding relation in the

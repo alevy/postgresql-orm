@@ -6,7 +6,7 @@ module Database.PostgreSQL.ORM (
   , DBKey(..), DBRef, DBRefUnique, mkDBRef
   , (:.), As(..), RowAlias(..), fromAs
   -- ** Single-row operations
-  , findRow, save, destroy, destroyByRef
+  , findRow, findAll, save, trySave, destroy, destroyByRef
   -- * Abstracted select queries
   , DBSelect(..), modelDBSelect, dbSelectParams, dbSelect
   , addWhere_, addWhere, setOrderBy, setLimit, setOffset
@@ -19,7 +19,7 @@ module Database.PostgreSQL.ORM (
   -- ** Chaining associations
   , nestAssoc, chainAssoc
   -- ** Validations
-  , InvalidError(..), validate, validateLength, validateNotEmpty
+  , InvalidError(..), ValidationError(..), validate, validateNotEmpty
   ) where
 
 import Database.PostgreSQL.ORM.Model

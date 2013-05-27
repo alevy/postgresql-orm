@@ -1,45 +1,34 @@
-{-# LANGUAGE FlexibleContexts#-}
+{-# LANGUAGE FlexibleContexts, DeriveDataTypeable #-}
 module Database.PostgreSQL.ORM.Validations where
 
-import qualified Data.ListLike as LL
---import Text.Regex.Posix
+import Control.Exception
+import qualified Data.Text as T
+import Data.Typeable
+import qualified Data.ByteString.Char8 as S8
 
 data InvalidError = InvalidError
-  { invalidColumn :: String
-  , invalidError  :: String } deriving (Show)
+  { invalidColumn :: !S8.ByteString
+  , invalidError  :: !S8.ByteString } deriving (Show)
+
+newtype ValidationError = ValidationError [InvalidError]
+  deriving (Show, Typeable)
+
+instance Exception ValidationError
 
 type ValidationFunc a = a -> [InvalidError]
 
 validate :: (a -> Bool)
-         -> String -- ^ Column name
-         -> String -- ^ Error description
+         -> S8.ByteString -- ^ Column name
+         -> S8.ByteString -- ^ Error description
          -> ValidationFunc a
 validate validator columnName desc = \a ->
   if validator a then
     []
     else [InvalidError columnName desc]
 
-validateLength :: LL.ListLike lst elm
-               => (a -> lst)
-               -> Int
-               -> String
-               -> String
-               -> ValidationFunc a
-validateLength accessor len =
-  validate (\a -> LL.length (accessor a) > len)
-
-validateNotEmpty :: LL.ListLike lst elm
-                 => (a -> lst)
-                 -> String
-                 -> String
+validateNotEmpty :: (a -> T.Text)
+                 -> S8.ByteString
+                 -> S8.ByteString
                  -> ValidationFunc a
-validateNotEmpty accessor = validate (not . LL.null . accessor)
+validateNotEmpty accessor = validate (not . T.null . accessor)
 
---validateFormat :: (RegexMaker Regex CompOption ExecOption format,
---                  RegexLike Regex str)
---               => (a -> str)
---               -> format
---               -> String
---               -> String
---               -> ValidationFunc a
---validateFormat accessor format = validate (\a -> accessor a =~ format)

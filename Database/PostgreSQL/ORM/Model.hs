@@ -14,7 +14,7 @@ module Database.PostgreSQL.ORM.Model (
     , DBKeyType, DBKey(..), isNullKey
     , DBRef, DBRefUnique, GDBRef(..), mkDBRef
       -- * Database operations on Models
-    , findAll, findRow, save, destroy, destroyByRef
+    , findAll, findRow, save, trySave, destroy, destroyByRef
       -- * Functions for accessing and using Models
     , modelName, primaryKey, modelSelectFragment
     , LookupRow(..), UpdateRow(..), InsertRow(..)
@@ -40,6 +40,7 @@ module Database.PostgreSQL.ORM.Model (
     ) where
 
 import Control.Applicative
+import Control.Exception
 import Control.Monad
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Char8 as S8
@@ -938,18 +939,22 @@ findRow c k = action
 -- the primary key is not 'NullKey', then the 'Model' is writen with
 -- an @UPDATE@ query and returned as-is.
 save :: (Model r)
-     => Connection -> r -> IO (Either r [InvalidError])
-save c r | not . null $ modelValid r = return . Right $ modelValid r
-         | NullKey <- primaryKey r = do
+     => Connection -> r -> IO r
+save c r | NullKey <- primaryKey r = do
                rs <- query c (modelInsertQuery qs) (InsertRow r)
-               case rs of [r'] -> return . Left $ lookupRow r'
+               case rs of [r'] -> return $ lookupRow r'
                           _    -> fail "save: database did not return row"
          | otherwise = do
                n <- execute c (modelUpdateQuery qs) (UpdateRow r)
-               case n of 1 -> return $ Left r
+               case n of 1 -> return r
                          _ -> fail $ "save: database updated " ++ show n
                                      ++ " records"
   where qs = modelQueries `gAsTypeOf` r
+
+trySave :: Model r
+        => Connection -> r -> IO r
+trySave c r | not . null $ modelValid r = throw $ ValidationError $ modelValid r
+            | otherwise = save c r
 
 -- | Remove the row corresponding to a particular data structure from
 -- the database.  This function only looks at the primary key in the
