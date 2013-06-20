@@ -933,28 +933,37 @@ findRow c k = action
                     case rs of [r] -> return $ Just $ lookupRow $ r
                                _   -> return Nothing
 
+-- | Like 'trySave' but instead of returning an 'Either', throws a
+-- 'ValidationError' if the 'Model' is invalid.
+save :: (Model r)
+     => Connection -> r -> IO r
+save c r = do
+  eResp <- trySave c r
+  case eResp of
+    Left resp -> return resp
+    Right errs -> throw $ ValidationError errs
+
 -- | Write a 'Model' to the database.  If the primary key is
 -- 'NullKey', the item is written with an @INSERT@ query, read back
 -- from the database, and returned with its primary key filled in.  If
 -- the primary key is not 'NullKey', then the 'Model' is writen with
 -- an @UPDATE@ query and returned as-is.
-save :: (Model r)
-     => Connection -> r -> IO r
-save c r | NullKey <- primaryKey r = do
-               rs <- query c (modelInsertQuery qs) (InsertRow r)
-               case rs of [r'] -> return $ lookupRow r'
-                          _    -> fail "save: database did not return row"
-         | otherwise = do
-               n <- execute c (modelUpdateQuery qs) (UpdateRow r)
-               case n of 1 -> return r
-                         _ -> fail $ "save: database updated " ++ show n
-                                     ++ " records"
-  where qs = modelQueries `gAsTypeOf` r
-
+-- If the 'Model' is invalid (i.e. the return value of 'modelValid' is
+-- non-empty), a list of 'InvalidError' is returned instead.
 trySave :: Model r
-        => Connection -> r -> IO r
-trySave c r | not . null $ modelValid r = throw $ ValidationError $ modelValid r
-            | otherwise = save c r
+        => Connection -> r -> IO (Either r [InvalidError])
+trySave c r | not . null $ errors = return $ Right errors
+            | NullKey <- primaryKey r = do
+                  rs <- query c (modelInsertQuery qs) (InsertRow r)
+                  case rs of [r'] -> return $ Left $ lookupRow r'
+                             _    -> fail "save: database did not return row"
+            | otherwise = do
+                  n <- execute c (modelUpdateQuery qs) (UpdateRow r)
+                  case n of 1 -> return $ Left r
+                            _ -> fail $ "save: database updated " ++ show n
+                                        ++ " records"
+  where qs = modelQueries `gAsTypeOf` r
+        errors = modelValid r
 
 -- | Remove the row corresponding to a particular data structure from
 -- the database.  This function only looks at the primary key in the

@@ -1,5 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
-module Database.PostgreSQL.Migration where
+module Database.PostgreSQL.Migrations where
 
 import Control.Monad
 import qualified Data.ByteString as S
@@ -10,7 +10,6 @@ import Database.PostgreSQL.Simple.Internal (exec)
 import Database.PostgreSQL.Simple.Types
 import System.Environment
 import System.Exit
-import System.FilePath
 
 connectEnv :: IO Connection
 connectEnv = do
@@ -23,9 +22,6 @@ runSqlFile :: Connection -> FilePath -> IO ()
 runSqlFile conn sqlFile = void $ do
     rawSql <- S.readFile sqlFile
     exec conn rawSql
-
-defaultMigrationDir :: FilePath
-defaultMigrationDir = "db" </> "migrations"
 
 create_table :: S8.ByteString -> [S8.ByteString] -> Query
 create_table tableName colDefs = Query $ S8.concat $
