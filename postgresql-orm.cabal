@@ -24,7 +24,6 @@ library
                , directory
                , filepath
                , ghc-prim
-               , ListLike
                , postgresql-simple
                , process
                , text
