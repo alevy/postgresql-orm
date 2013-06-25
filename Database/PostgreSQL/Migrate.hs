@@ -40,7 +40,9 @@ import System.IO
    the file should provide the following usage:
 
    @
-     /migration_file_12345.hs/ COMMAND [--with-db-commit]
+
+     SYNOPSIS
+     /12345_migration_file.hs/ COMMAND [--with-db-commit]
 
      COMMANDS
          up
@@ -81,7 +83,7 @@ import System.IO
 
     @
       CREATE TABLE schema_migrations (
-        version VARCHAR(14)
+        version VARCHAR(28)
       );
     @
 
@@ -120,7 +122,7 @@ dumpDb outputFile = do
 initializeDb :: IO ExitCode
 initializeDb = do
   conn <- connectEnv
-  void $ execute_ conn "create table schema_migrations (version VARCHAR(14))"
+  void $ execute_ conn "create table schema_migrations (version VARCHAR(28))"
   return ExitSuccess
 
 -- | Runs all new migrations in a given directory and dumping the result schema
