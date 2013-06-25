@@ -1,18 +1,12 @@
 {-# LANGUAGE OverloadedStrings #-}
 
--- | Functions for creating and running database migrations.
---
+-- | Functions for creating and running database migrations. You should
+-- probably be using the `pg_migrate` executable to run migrations, however
+-- these functions are exposed for developers that want to integrate migrations
+-- more tightly into their applications or utilities.
+
 module Database.PostgreSQL.Migrate
   ( 
-  -- * Overview
-  -- $overview
-
-  -- * Migration file names
-  -- $files
-
-  -- * Database format
-  -- $dbformat
-
      initializeDb
   ,  runMigrationsForDir
   ,  runRollbackForDir
@@ -33,65 +27,6 @@ import System.Directory
 import System.FilePath
 import System.Environment
 import System.IO
-
-{- $overview
-   A database migration is an executable Haskell source file
-   (e.g. a Haskell source file with a main function). When executed,
-   the file should provide the following usage:
-
-   @
-
-     SYNOPSIS
-     /12345_migration_file.hs/ COMMAND [--with-db-commit]
-
-     COMMANDS
-         up
-             Upgrade the database with the migration
-         rollback
-             Downgrade the database by rolling back the migration
-
-     ARGUMENTS
-         --with-db-commit
-             MUST be included in order to actually commit the migration
-             or rollback to the database. If this argument is not included,
-             a test run is implied, and the migration should affect the
-             database, probably by rolling back the transaction before exiting.
-   @
-
-   While migrations can be hand written,
-   `Database.PostgreSQL.Migrations.defaultMain` implements this functionality.
--}
-
-{- $files
-    Migrations files are underscore delimited and contain the version followed
-    by a descriptive name:
-
-    @
-      201304021245_create_users_table.hs
-    @
-
-    Versions are ordered lexically and can be any string not containing the
-    characters \'.\' or \'_\'. However, a common choice is the GMT time of
-    creation formatted in decreasing order of significance: %Y%m%d%H%M.
-  
- -}
-
-{- $dbformat
-    The only requirement on the database is that it contain a table
-    /schema_migrations/ with a VARCHAR column /version/. 'initializeDb'
-    will create such a table, by running the following SQL:
-
-    @
-      CREATE TABLE schema_migrations (
-        version VARCHAR(28)
-      );
-    @
-
-    When a migration is run, it's version is inserted into this table. When
-    it is rolled back, the version is removed. Maintaining all migration
-    versions in the database allows us to easily run only new migrations.
-
- -}
 
 -- | The default relative path containing migrations: \".\/dir\/migrations\"
 defaultMigrationsDir :: FilePath
