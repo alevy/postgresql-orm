@@ -1,0 +1,44 @@
+.TH pg_migrate 5 "" 
+.SH NAME
+.PP
+PostgreSQL ORM migration
+.SH SYNOPSIS
+.IP
+.nf
+\f[C]
+201305041232_migration_file.hs\ COMMAND\ [\-\-with\-db\-commit]
+\f[]
+.fi
+.SH DESCRIPTION
+.PP
+A Migrations is an executable Haskell source file (e.g.
+a Haskell source file with a "\f[C]main\ ::\ IO\ ()\f[]" function,
+runnable by \f[C]runghc\f[]).
+It must respond to the commands "up" and "down" by running a migration
+and rollback, respectively.
+Unless the "\-\-with\-db\-commit" flag is set, the result of the
+migration or rollback should not be committed to the database.
+.PP
+While you can implement a migration however you like, the module
+\f[C]Database.PostgreSQL.Migrations\f[] in the \f[C]postgresql\-orm\f[]
+package defines a function called \f[C]defaultMain\f[] that implements
+most of the boiler plate functionality of a migration.
+You need only implement the actual migration and rollback code.
+.SH COMMANDS
+.SS up
+.PP
+Upgrade the database by running the migration
+.SS down
+.PP
+Downgrade the database by rolling back the migration
+.SH FLAGS
+.SS \-\-with\-db\-commit
+.PP
+MUST be included in order to actually commit the migration or rollback
+to the database.
+If this argument is not included, a test run is implied, and the
+migration should affect the database, probably by rolling back the
+transaction before exiting.
+.SH SEE ALSO
+.PP
+pg_migrate(1), runghc(1)

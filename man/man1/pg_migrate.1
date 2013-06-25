@@ -1,0 +1,90 @@
+.TH pg_migrate 1 "" 
+.SH NAME
+.PP
+pg_migrate \- PostgreSQL ORM migrations runner
+.SH SYNOPSIS
+.IP
+.nf
+\f[C]
+pg_migrate\ COMMAND\ [directory]
+\f[]
+.fi
+.SH DESCRIPTION
+.PP
+pg_migrate is a utility for managing migrations on a PostgreSQL
+database.
+It allows you to run migrations from a directory, only running those not
+yet applied and rollback to previous versions.
+For example, in development, use pg_migrate to iterate on your database
+schema, and in production, use it to retain a rollback path when pushing
+code that requires a new schema.
+.PP
+Migrations are executable Haskell source code files that run a single
+migration and corresponding rollback.
+All migrations for a project should be stored in the same directory.
+See pg_migrate(5) for details on how migrations are run.
+.SS Migration File Names
+.PP
+Migrations files are underscore delimited and contain the version
+followed by a descriptive name:
+.IP
+.nf
+\f[C]
+\ \ 201304021245_create_users_table.hs
+\f[]
+.fi
+.PP
+Versions are ordered lexically and can be any string not containing the
+characters \[aq].\[aq] or \[aq]_\[aq].
+However, a common choice is the GMT time of creation formatted in
+decreasing order of significance: %Y%m%d%H%M.
+.SS Database format
+.PP
+The only requirement on the database is that it contain a table
+schema_migrations with a VARCHAR column version.
+running "\f[I]pg_migrate init\f[]" will create such a table, by running
+the following SQL:
+.IP
+.nf
+\f[C]
+\ \ CREATE\ TABLE\ schema_migrations\ (
+\ \ \ \ version\ VARCHAR(28)
+\ \ );
+\f[]
+.fi
+.PP
+When a migration is run, it\[aq]s version is inserted into this table.
+When it is rolled back, the version is removed.
+Maintaining all migration versions in the database allows us to easily
+run only new migrations.
+.SH COMMANDS
+.SS migrate [directory]
+.PP
+Run all migrations found in \f[I]directory\f[], starting with the oldest
+migrations not yet commited to the database.
+If not specified, \f[I]directory\f[] is "db/migrations".
+.SS rollback [directory]
+.PP
+Rollback the newest migration in \f[I]directory\f[] committed to the
+database.
+If not specified, \f[I]directory\f[] is "db/migrations".
+.SS init
+.PP
+Prepare the database for using migrations by creating the
+"schema_migrations" table.
+This command will fail if such a table already exists without destroying
+the existing table.
+.SS dump [file]
+.PP
+Dump the current database schema to the \f[I]file\f[], or
+"db/schema.sql" if not \f[I]file\f[] is specified.
+The current implementation simply runs pg_dump(1):
+.IP
+.nf
+\f[C]
+pg_dump\ \-\-schema\-only\ \-O\ \-x
+\f[]
+.fi
+.SH SEE ALSO
+.PP
+pg_migrate(5), pg_dump(1)
