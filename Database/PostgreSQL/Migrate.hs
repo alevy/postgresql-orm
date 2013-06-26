@@ -54,11 +54,10 @@ dumpDb outputFile = do
 
 -- | Initializes the database by creating a \"schema-migrations\" table.
 -- This table must exist before running any migrations.
-initializeDb :: IO ExitCode
+initializeDb :: IO ()
 initializeDb = do
   conn <- connectEnv
   void $ execute_ conn "create table schema_migrations (version VARCHAR(28))"
-  return ExitSuccess
 
 -- | Runs all new migrations in a given directory and dumping the result schema
 -- to a file \"schema.sql\" in the migrations directory.
@@ -66,8 +65,10 @@ initializeDb = do
 -- Determining which migrations to run is done by querying the database for the
 -- largest version in the /schema_migrations/ table, and choosing all
 -- migrations in the given directory with higher versions.
-runMigrationsForDir :: FilePath -> IO ExitCode
-runMigrationsForDir dir = do
+runMigrationsForDir :: Handle -- ^ Log output (probably stdout)
+                    -> FilePath -- ^ Path to directory containing migrations
+                    -> IO ExitCode
+runMigrationsForDir logOut dir = do
   conn <- connectEnv
   res <- query_ conn
           "select version from schema_migrations order by version desc limit 1"
@@ -78,17 +79,22 @@ runMigrationsForDir dir = do
                     return . (dropWhile (isVersion (<= latestVersion)))
   go migrations
   where go [] = withFile (dir </> ".." </> "schema.sql") WriteMode dumpDb
-        go (MigrationDetails file version name:fs) = do
-              putStrLn $ "=== Running Migration " ++ name
-              exitCode <- rawSystem "runghc"
-                            [ "-XOverloadedStrings", file, "up", version
-                            , "--with-db-commit"]
+        go (mig@(MigrationDetails _ _ name):fs) = do
+              hPutStrLn logOut $ "=== Running Migration " ++ name
+              exitCode <- runMigration mig
               if exitCode == ExitSuccess then do
-                putStrLn "=== Success"
+                hPutStrLn logOut "=== Success"
                 go fs
                 else do
-                  putStrLn "=== Migration Failed!"
+                  hPutStrLn logOut "=== Migration Failed!"
                   return exitCode
+
+-- | Run a migration. The returned exit code denotes the success or failure of
+-- the migration.
+runMigration :: MigrationDetails -> IO ExitCode
+runMigration (MigrationDetails file version _) = do
+  rawSystem "runghc"
+    ["-XOverloadedStrings", file, "up", version, "--with-db-commit"]
 
 runRollbackForDir :: FilePath -> IO ExitCode
 runRollbackForDir dir = do
@@ -98,19 +104,24 @@ runRollbackForDir dir = do
   let latestVersion = case res of
                         [] -> ""
                         (Only latest):_ -> latest
-  (Just (MigrationDetails file version name)) <-
+  (Just (mig@(MigrationDetails _ _ name))) <-
               getDirectoryMigrations dir >>=
                 return . (find (isVersion (== latestVersion)))
   putStrLn $ "=== Running Rollback " ++ name
-  exitCode <- rawSystem "runghc"
-                [ "-XOverloadedStrings", file, "down", version
-                , "--with-db-commit"]
+  exitCode <- runRollback mig
   if exitCode == ExitSuccess then do
     putStrLn "=== Success"
     withFile (dir </> ".." </> "schema.sql") WriteMode dumpDb
     else do
       putStrLn "=== Migration Failed!"
       return exitCode
+
+-- | Run a migration. The returned exit code denotes the success or failure of
+-- the migration.
+runRollback :: MigrationDetails -> IO ExitCode
+runRollback (MigrationDetails file version _) = do
+  rawSystem "runghc"
+    ["-XOverloadedStrings", file, "down", version, "--with-db-commit"]
 
 data MigrationDetails = MigrationDetails FilePath String String deriving (Show)
 
