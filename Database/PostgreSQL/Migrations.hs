@@ -1,19 +1,23 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 {- |
-Example migration:
+Functions to help with building database migrations.
 
+Most users will want to create a database migration using @defaultMain@ as
+follows,
+
+>
 > import Database.PostgreSQL.Migrations
-> 
+>
+> main = defaultMain up down
+>
 > up = migrate $ do
 >       create_table "posts"
 >         [ column "title" "VARCHAR(255) NOT NULL"
 >         , column "author_id" "integer references authors(id)"]
 > 
 > down = migrate $ drop_table "posts"
-> 
-> main = defaultMain up down
-
+>
 -}
 module Database.PostgreSQL.Migrations (
     -- * Utilities
@@ -26,9 +30,11 @@ module Database.PostgreSQL.Migrations (
     -- ** Adding
   , create_table
   , add_column
+  , create_index
     -- ** Removing
   , drop_table
   , drop_column
+  , drop_index
     -- ** Modifying
   , rename_column
   , change_column
@@ -275,6 +281,48 @@ change_column_stmt tableName colName action = Query $ S8.concat
 data CmdArgs = CmdArgs { cmd :: String
                        , cmdVersion :: String
                        , cmdCommit :: Bool }
+
+-- | Returns a 'Query' that creates an index for the given columns on the given
+-- table. For example,
+--
+-- @
+--   create_index \"post_owner_index\" \"posts\" \"owner\"
+-- @
+--
+-- Returns the query
+--
+-- @
+--   CREATE INDEX \"post_owner_index\" ON \"posts\" (\"owner\")
+-- @
+create_index :: S8.ByteString
+             -- ^ Index name
+             -> S8.ByteString
+             -- ^ Table name
+             -> [S8.ByteString]
+             -- ^ Column names
+             -> Query
+create_index indexName tableName colNames = Query $ S8.concat
+  [ "create index \"", indexName, "\" on \"", tableName
+  , "\" (", cols, ")", ";" ]
+  where cols = S8.intercalate ", " $ map quote colNames
+        quote x = ('"' `S8.cons` x) `S8.snoc` '"'
+
+-- | Returns a 'Query' that drops an index.
+--
+-- @
+--   drop_index \"post_owner_index\"
+-- @
+--
+-- Returns the query
+--
+-- @
+--   DROP INDEX \"post_owner_index\"
+-- @
+drop_index :: S8.ByteString
+           -- ^ Index name
+           -> Query
+drop_index indexName = Query $ S8.concat
+  [ "drop index \"", indexName, "\";" ]
 
 parseCmdArgs :: [String] -> Maybe CmdArgs
 parseCmdArgs args = do
