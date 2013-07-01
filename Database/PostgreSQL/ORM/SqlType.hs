@@ -1,6 +1,7 @@
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 module Database.PostgreSQL.ORM.SqlType (SqlType(..), getTypeOid) where
 
@@ -20,7 +21,6 @@ import Database.PostgreSQL.Simple.ToField
 import Database.PostgreSQL.Simple.TypeInfo.Static
 import Database.PostgreSQL.Simple.Types
 
-import Data.AsTypeOf
 import Database.PostgreSQL.ORM.Model
 
 newtype ExtractTypeOid = ExtractTypeOid Oid
@@ -50,7 +50,7 @@ class (ToField a, FromField a) => SqlType a where
   -- @sqlType@ is unspecified, the default is to append \"@NOT NULL@\"
   -- to 'sqlBaseType'.
   {-# INLINE sqlType #-}
-  sqlType a = (sqlBaseType $ undefined `asTypeOf` a) <> " NOT NULL"
+  sqlType _ = (sqlBaseType (undefined :: a)) <> " NOT NULL"
 
 #define TYPE(hs, sql) \
     instance SqlType (hs) where sqlBaseType _ = typname (sql)
@@ -85,24 +85,24 @@ instance SqlType DBKey where
   sqlBaseType _ = error "DBKey should not be wrapped in type"
 
 instance (SqlType a) => SqlType (Maybe a) where
-  sqlType ~(Just a) = sqlBaseType a
+  sqlType _ = sqlBaseType (undefined :: a)
   sqlBaseType _ = error "Table field Maybe should not be wrapped in other type"
 
 instance (Typeable a, SqlType a) => SqlType (V.Vector a) where
-  sqlBaseType va = sqlBaseType (undef1 va) <> "[]"
+  sqlBaseType _ = sqlBaseType (undefined :: a) <> "[]"
 
 instance (Model a) => SqlType (DBRef a) where
-  sqlBaseType r@(DBRef k) = sqlBaseType k <> ref
-    where t = modelInfo `gAsTypeOf1` r
-          Just orig = modelOrigTable $ modelIdentifiers `gAsTypeOf1` r
+  sqlBaseType (DBRef k) = sqlBaseType k <> ref
+    where t = modelInfo :: ModelInfo a
+          Just orig = modelOrigTable (modelIdentifiers :: ModelIdentifiers a)
           ref = S.concat [
               " REFERENCES ", quoteIdent orig, "("
               , quoteIdent (modelColumns t !! modelPrimaryColumn t), ")" ]
 
 instance (Model a) => SqlType (DBRefUnique a) where
-  sqlBaseType r@(DBRef k) = sqlBaseType k <> ref
-    where t = modelInfo `gAsTypeOf1` r
-          Just orig = modelOrigTable $ modelIdentifiers `gAsTypeOf1` r
+  sqlBaseType (DBRef k) = sqlBaseType k <> ref
+    where t = modelInfo :: ModelInfo a
+          Just orig = modelOrigTable (modelIdentifiers :: ModelIdentifiers a)
           ref = S.concat [
               " UNIQUE REFERENCES ", quoteIdent orig , "("
               , quoteIdent (modelColumns t !! modelPrimaryColumn t), ")" ]

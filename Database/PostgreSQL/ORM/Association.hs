@@ -2,6 +2,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeOperators #-}
 
 module Database.PostgreSQL.ORM.Association (
@@ -28,7 +29,6 @@ import Database.PostgreSQL.Simple
 import Database.PostgreSQL.Simple.ToField
 import Database.PostgreSQL.Simple.Types
 
-import Data.AsTypeOf
 import Data.GetField
 import Database.PostgreSQL.Escape
 import Database.PostgreSQL.ORM.DBSelect
@@ -300,13 +300,14 @@ instance Extractor ExtractRef (Maybe (GDBRef rt a)) (DBRef (As alias a))
 -- > 
 -- > toChild :: Association (As ParentBar Bar) Bar
 -- > toChild = has
-defaultDBRefInfo :: (Model child, Model parent
+defaultDBRefInfo :: forall child parent.
+                    (Model child, Model parent
                     , GetField ExtractRef child (DBRef parent)) =>
                     DBRefInfo child parent
 defaultDBRefInfo = ri
   where extractor = (const ExtractRef :: g p -> ExtractRef (DBRef p)) ri
-        child = undef2 ri
-        childids = modelIdentifiers `gAsTypeOf` child
+        child = undefined :: child
+        childids = modelIdentifiers :: ModelIdentifiers child
         ri = DBRefInfo {
             dbrefSelector = getFieldVal extractor
           , dbrefQColumn = modelQColumns childids !! getFieldPos extractor child
@@ -314,11 +315,12 @@ defaultDBRefInfo = ri
 
 -- | Generate both the child-parent and parent-child 'Association's
 -- implied by a 'GDBRefInfo'.
-dbrefAssocs :: (Model child, Model parent) =>
+dbrefAssocs :: forall child parent rt.
+               (Model child, Model parent) =>
                GDBRefInfo rt child parent
                -> (Association child parent, Association parent child)
 dbrefAssocs ri = (c_p, p_c)
-  where idp = modelIdentifiers `gAsTypeOf1` ri
+  where idp = modelIdentifiers :: ModelIdentifiers parent
         on = Query $ "ON " <> modelQPrimaryColumn idp
              <> " = " <> dbrefQColumn ri
         c_p = Association {
@@ -410,12 +412,12 @@ data JoinTable a b = JoinTable {
 -- > selfJoin :: Association Bar (As ParentBar Bar)
 -- > otherSelfJoin :: Association (As ParentBar Bar) Bar
 -- > (selfJoin, otherSelfJoin) = jtAssocs selfJoinTable
-defaultJoinTable :: (Model a, Model b) => JoinTable a b
+defaultJoinTable :: forall a b. (Model a, Model b) => JoinTable a b
 defaultJoinTable
   | colA == colB = error "defaultJoinTable has default for self joins"
   | otherwise = jti
-  where a = modelInfo `gAsTypeOf2` jti
-        b = modelInfo `gAsTypeOf1` jti
+  where a = modelInfo :: ModelInfo a
+        b = modelInfo :: ModelInfo b
         colA = S.intercalate "_"
                [modelTable a, modelColumns a !! modelPrimaryColumn a]
         colB = S.intercalate "_"
@@ -495,7 +497,7 @@ jtParam _ a b = [toField $ primaryKey a, toField $ primaryKey b]
 
 -- | Generate a one-way association from a 'JoinTable'.  Use
 -- 'jtAssocs' instead.
-jtAssoc :: (Model a, Model b) => JoinTable a b -> Association a b
+jtAssoc :: forall a b. (Model a, Model b) => JoinTable a b -> Association a b
 jtAssoc jt = Association {
     assocSelect = dbJoin modelDBSelect "JOIN" onlyB $ Query $ S.concat [
        "ON ", priA, " = ", jtQColumnA jt]
@@ -503,9 +505,9 @@ jtAssoc jt = Association {
   , assocWhereQuery = Query $ jtQColumnA jt <> " = ?"
   , assocWhereParam = \a -> [toField $ primaryKey a]
   }
-  where priA = modelQPrimaryColumn $ modelIdentifiers `gAsTypeOf2` jt
-        priB = modelQPrimaryColumn $ modelIdentifiers `gAsTypeOf1` jt
-        selB = modelDBSelect `gAsTypeOf1` jt
+  where priA = modelQPrimaryColumn (modelIdentifiers :: ModelIdentifiers a)
+        priB = modelQPrimaryColumn (modelIdentifiers :: ModelIdentifiers b)
+        selB = modelDBSelect :: DBSelect b
         fromB = FromJoin
                 (FromModel (Query $ jtQTable jt) (jtQTable jt))
                 "JOIN" (selFrom selB)

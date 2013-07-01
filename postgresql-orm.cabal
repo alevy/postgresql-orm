@@ -39,8 +39,7 @@ library
                , unix
                , vector
   ghc-options: -Wall
-  exposed-modules: Data.AsTypeOf
-                 , Data.GetField
+  exposed-modules: Data.GetField
                  , Data.RequireSelector
                  , Database.PostgreSQL.Devel
                  , Database.PostgreSQL.Describe
@@ -60,6 +59,7 @@ library
                   , MultiParamTypeClasses
                   , OverlappingInstances
                   , OverloadedStrings
+                  , ScopedTypeVariables
                   , TypeOperators
                   , UndecidableInstances
                -- , DefaultSignatures, DeriveGeneric

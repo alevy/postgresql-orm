@@ -2,6 +2,7 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeOperators #-}
 
 module Database.PostgreSQL.ORM.DBSelect (
@@ -31,7 +32,6 @@ import Database.PostgreSQL.Simple
 import Database.PostgreSQL.Simple.Types
 import GHC.Generics
 
-import Data.AsTypeOf
 import Database.PostgreSQL.Escape
 import Database.PostgreSQL.ORM.Model
 
@@ -259,9 +259,9 @@ addExpression q dbs = dbs {
   }
 
 -- | A 'DBSelect' that returns all rows of a model.
-modelDBSelect :: (Model a) => DBSelect a
+modelDBSelect :: forall a. (Model a) => DBSelect a
 modelDBSelect = r
-  where mi = modelIdentifiers `gAsTypeOf1` r
+  where mi = modelIdentifiers :: ModelIdentifiers a
         r = emptyDBSelect {
           selFields = Query $ S.intercalate ", " $ modelQColumns mi
           , selFrom = FromModel (Query $ modelQTable mi) (modelQTable mi)
@@ -292,7 +292,8 @@ dbSelect c dbs = map lookupRow <$> query_ c q
 -- simply taken from the second 'DBSelect', meaning fields such as
 -- 'selWith', 'selGroupBy', and 'selOrderBy' in the in the first
 -- 'DBSelect' are entirely ignored.
-dbJoin :: (Model a, Model b) =>
+dbJoin :: forall a b.
+          (Model a, Model b) =>
           DBSelect a      -- ^ First table
           -> Query        -- ^ Join keyword (@\"JOIN\"@, @\"LEFT JOIN\"@, etc.)
           -> DBSelect b   -- ^ Second table
@@ -303,8 +304,7 @@ dbJoin left joinOp right onClause = addWhere_ (selWhere left) right {
                                   fromQuery $ selFields right]
   , selFrom = newfrom
   }
-  where idab = modelIdentifiers `gAsTypeOf`
-               (undefined :: g a -> g b -> a :. b) left right
+  where idab = modelIdentifiers :: ModelIdentifiers (a :. b)
         newfrom | nullFrom $ selFrom right = selFrom left
                 | nullFrom $ selFrom left = selFrom right
                 | otherwise = FromJoin (selFrom left) joinOp (selFrom right)
@@ -323,10 +323,11 @@ dbJoinModels kw on = dbJoin modelDBSelect kw modelDBSelect on
 -- of @something_containing_a@, but no static check is performed that
 -- this is the case.  If you @dbProject@ a type that doesn't make
 -- sense, you will get a runtime error from a failed database query.
-dbProject :: (Model a) => DBSelect something_containing_a -> DBSelect a
+dbProject :: forall a something_containing_a.
+             (Model a) => DBSelect something_containing_a -> DBSelect a
 {-# INLINE dbProject #-}
 dbProject dbs = r
-  where sela = modelDBSelect `gAsTypeOf1` r
+  where sela = modelDBSelect :: DBSelect a
         r = dbs { selFields = selFields sela }
 
 -- | Like 'dbProject', but renders the entire input 'DBSelect' as a
@@ -338,10 +339,11 @@ dbProject dbs = r
 -- into the subquery (whereas otherwise they could get dropped by join
 -- operations).  Generally you will still want to use 'dbProject', but
 -- @dbProject'@ is available when needed.
-dbProject' :: (Model a) => DBSelect something_containing_a -> DBSelect a
+dbProject' :: forall a something_containing_a.
+              (Model a) => DBSelect something_containing_a -> DBSelect a
 dbProject' dbs = r
-  where sela = modelDBSelect `gAsTypeOf1` r
-        ida = modelIdentifiers `gAsTypeOf1` r
+  where sela = modelDBSelect :: DBSelect a
+        ida = modelIdentifiers :: ModelIdentifiers a
         Just mq = modelQualifier ida
         q = toQuery $ fromChar '(' <>
             buildDBSelect dbs { selFields = selFields sela } <>
@@ -363,14 +365,14 @@ mergeFromClauses canon left right =
 -- | Nest two type-compatible @JOIN@ queries.  As with 'dbJoin',
 -- fields of the first @JOIN@ (the @'DBSelect' (a :. b)@) other than
 -- 'selFields', 'selFrom', and 'selWhere' are entirely ignored.
-dbNest :: (Model a, Model b) =>
+dbNest :: forall a b c. (Model a, Model b) =>
           DBSelect (a :. b) -> DBSelect (b :. c) -> DBSelect (a :. b :. c)
 dbNest left right = addWhere_ (selWhere left) right {
     selFields = fields
   , selFrom = mergeFromClauses nameb (selFrom left) (selFrom right)
   }
-  where nameb = modelQTable $ modelIdentifiers `gAsTypeOf1_1` left
-        acols = modelQColumns $ modelIdentifiers `gAsTypeOf1_2` left
+  where nameb = modelQTable (modelIdentifiers :: ModelIdentifiers b)
+        acols = modelQColumns (modelIdentifiers :: ModelIdentifiers a)
         colcomma c r = fromByteString c <> fromByteString ", " <> r
         fields = toQuery $ foldr colcomma (qBuilder $ selFields right)
                  acols

@@ -2,6 +2,7 @@
 {-# LANGUAGE DefaultSignatures #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE CPP #-}
@@ -60,7 +61,6 @@ import Database.PostgreSQL.Simple.Types
 import Database.PostgreSQL.ORM.Validations
 import GHC.Generics
 
-import Data.AsTypeOf
 import Data.RequireSelector
 import Database.PostgreSQL.Escape (quoteIdent)
 
@@ -333,10 +333,11 @@ deleteAt _ _     = []
 
 -- | Marshals all fields of a model /except/ the primary key (which is
 -- simply skipped).
-defaultModelWrite :: (Model a, Generic a, GToRow (Rep a)) => a -> [Action]
+defaultModelWrite :: forall a. (Model a, Generic a, GToRow (Rep a))
+                  => a -> [Action]
 {-# INLINE defaultModelWrite #-}
 defaultModelWrite a = deleteAt pki $ defaultToRow a
-  where pki = modelPrimaryColumn $ modelInfo `gAsTypeOf` a
+  where pki = modelPrimaryColumn (modelInfo :: ModelInfo a)
 
 -- | The default definition of 'modelInfo'. See the documentation at
 -- 'Model' for more information.  Sets 'modelTable' to the name of the
@@ -353,7 +354,8 @@ defaultModelWrite a = deleteAt pki $ defaultToRow a
 -- of defaults.  The default for 'modelPrimaryColumn' is 0.  If you
 -- overwrite that, you will need to overwrite 'modelGetPrimaryKey' as
 -- well (and likely vice versa).
-defaultModelInfo :: (Generic a, GDatatypeName (Rep a), GColumns (Rep a)
+defaultModelInfo :: forall a.
+                    (Generic a, GDatatypeName (Rep a), GColumns (Rep a)
                     , GPrimaryKey0 (Rep a)) => ModelInfo a
 defaultModelInfo = m
   where m = ModelInfo { modelTable = defaultModelTable a
@@ -361,7 +363,7 @@ defaultModelInfo = m
                       , modelPrimaryColumn = 0
                       , modelGetPrimaryKey = defaultModelGetPrimaryKey
                       }
-        a = undef1 m
+        a = undefined :: a
 
 -- | An alternate 'Model' pattern in which Haskell type and field
 -- names are converted from camel-case to underscore notation.  The
@@ -713,7 +715,8 @@ DEGENERATE((FromField a, FromField b, FromField c, FromField d, FromField e),
 #undef DEGEN_ERR
 #undef DEGENERATE
 
-joinModelIdentifiers :: (Model a, Model b) => ModelIdentifiers (a :. b)
+joinModelIdentifiers :: forall a b. (Model a, Model b)
+                     => ModelIdentifiers (a :. b)
 joinModelIdentifiers = r
   where r = ModelIdentifiers {
               modelQTable = qtable
@@ -728,8 +731,8 @@ joinModelIdentifiers = r
                | S.null $ modelQTable mia = modelQTable mib
                | otherwise = S.concat [modelQTable mia, " CROSS JOIN "
                                       , modelQTable mib]
-        mia = modelIdentifiers `gAsTypeOf1_2` r
-        mib = modelIdentifiers `gAsTypeOf1_1` r
+        mia = modelIdentifiers :: ModelIdentifiers a
+        mib = modelIdentifiers :: ModelIdentifiers b
 
 -- | A degenerate instance of model representing a database join.  The
 -- ':.' instance does not allow normal model operations such as
@@ -782,9 +785,10 @@ class RowAlias a where
   -- lower-case, following the logic of 'defaultModelTable'.
   default rowAliasName :: (Generic a, GUnitType (Rep a)) =>
                           g a row -> S.ByteString
-  rowAliasName as = fromString $ caseFold $ gUnitTypeName . from $ undef2 as
+  rowAliasName _ = fromString $ caseFold $ gUnitTypeName . from $ a
     where caseFold (h:t) = toLower h:t -- fold first character only
           caseFold []    = []
+          a = undefined :: a
 
 -- | The newtype @As@ can be wrapped around an existing type to give
 -- it a table name alias in a query.  This is necessary when a model
@@ -830,16 +834,17 @@ toAs :: alias -> row -> As alias row
 {-# INLINE toAs #-}
 toAs _ = As
 
-aliasModelInfo :: (Model a, RowAlias alias) =>
+aliasModelInfo :: forall a alias.
+                  (Model a, RowAlias alias) =>
                   ModelInfo a -> ModelInfo (As alias a)
 aliasModelInfo mi = r
-  where alias = rowAliasName $ undef1 r
+  where alias = rowAliasName (undefined :: As alias a)
         r = mi { modelTable = alias
                , modelGetPrimaryKey = modelGetPrimaryKey mi . unAs
                }
 
-aliasModelIdentifiers :: (Model a, RowAlias alias) =>
-                         ModelInfo a -> ModelIdentifiers (As alias a)
+aliasModelIdentifiers :: forall a alias. (Model a, RowAlias alias)
+                      => ModelInfo a -> ModelIdentifiers (As alias a)
 aliasModelIdentifiers mi
   | not ok    = error $ "aliasModelIdentifiers: degenerate model " ++
                 show (modelQTable ida )
@@ -852,11 +857,11 @@ aliasModelIdentifiers mi
           , modelQualifier = Just alias
           , modelOrigTable = Just orig
           }
-        ida = modelIdentifiers `gAsTypeOf1` mi
+        ida = modelIdentifiers :: ModelIdentifiers a
         ok = Just (modelQTable ida) == modelQualifier ida
              && isJust (modelOrigTable ida)
         Just orig = modelOrigTable ida
-        alias = quoteIdent $ rowAliasName $ undef1 r
+        alias = quoteIdent $ rowAliasName (undefined :: As alias a)
         qcol c = S.concat [alias, ".", quoteIdent c]
         qcols = map qcol $ modelColumns mi
         pki = modelPrimaryColumn mi
@@ -876,11 +881,11 @@ instance (Model a, RowAlias as) => Model (As as a) where
   modelQueries = error "attempt to perform standard query on AS table alias"
 
 
--- | Lookup the 'modelTable' of a 'Model' (@modelName = 'modelTable'
--- . 'gAsTypeOf' 'modelInfo'@).
-modelName :: (Model a) => a -> S.ByteString
+-- | Lookup the 'modelTable' of a 'Model' (@modelName _ =
+-- 'modelTable' ('modelInfo :: ModelInfo a')@).
+modelName :: forall a. (Model a) => a -> S.ByteString
 {-# INLINE modelName #-}
-modelName = modelTable . gAsTypeOf modelInfo
+modelName _ = modelTable (modelInfo :: ModelInfo a)
 
 -- | Lookup the primary key of a 'Model'.
 primaryKey :: (Model a) => a -> DBKey
@@ -918,17 +923,17 @@ instance (Model a) => ToRow (UpdateRow a) where
 --
 -- Note that unlike the other primary model operations, it is okay to
 -- call 'findAll' even on degenerate models such as 'As' and ':.'.
-findAll :: (Model r) => Connection -> IO [r]
+findAll :: forall r. (Model r) => Connection -> IO [r]
 findAll c = action
-  where mi = modelIdentifiers `gAsTypeOf1_1` action
+  where mi = modelIdentifiers :: ModelIdentifiers r
         q = Query $ modelSelectFragment mi
         action = map lookupRow <$> query_ c q
 
 -- | Follow a 'DBRef' or 'DBRefUnique' and fetch the target row from
 -- the database into a 'Model' type @r@.
-findRow :: (Model r) => Connection -> GDBRef rt r -> IO (Maybe r)
+findRow :: forall r rt. (Model r) => Connection -> GDBRef rt r -> IO (Maybe r)
 findRow c k = action
-  where qs = modelQueries `gAsTypeOf1_1` action
+  where qs = modelQueries :: ModelQueries r
         action = do rs <- query c (modelLookupQuery qs) (Only k)
                     case rs of [r] -> return $ Just $ lookupRow $ r
                                _   -> return Nothing
@@ -950,7 +955,7 @@ save c r = do
 -- an @UPDATE@ query and returned as-is.
 -- If the 'Model' is invalid (i.e. the return value of 'modelValid' is
 -- non-empty), a list of 'InvalidError' is returned instead.
-trySave :: Model r
+trySave :: forall r. Model r
         => Connection -> r -> IO (Either r [InvalidError])
 trySave c r | not . null $ errors = return $ Right errors
             | NullKey <- primaryKey r = do
@@ -962,24 +967,24 @@ trySave c r | not . null $ errors = return $ Right errors
                   case n of 1 -> return $ Left r
                             _ -> fail $ "save: database updated " ++ show n
                                         ++ " records"
-  where qs = modelQueries `gAsTypeOf` r
+  where qs = modelQueries :: ModelQueries r
         errors = modelValid r
 
 -- | Remove the row corresponding to a particular data structure from
 -- the database.  This function only looks at the primary key in the
 -- data structure.  It is an error to call this function if the
 -- primary key is not set.
-destroy :: (Model a) => Connection -> a -> IO ()
+destroy :: forall a. (Model a) => Connection -> a -> IO ()
 destroy c a =
   case primaryKey a of
     NullKey -> fail "destroy: NullKey"
     DBKey k -> void $ execute c
-               (modelDeleteQuery $ modelQueries `gAsTypeOf` a) (Only k)
+               (modelDeleteQuery (modelQueries :: ModelQueries a)) (Only k)
 
 -- | Remove a row from the database without fetching it first.
-destroyByRef :: (Model a) => Connection -> GDBRef rt a -> IO ()
+destroyByRef :: forall a rt. (Model a) => Connection -> GDBRef rt a -> IO ()
 destroyByRef c a =
-  void $ execute c (modelDeleteQuery $ modelQueries `gAsTypeOf1` a) (Only a)
+  void $ execute c (modelDeleteQuery (modelQueries :: ModelQueries a)) (Only a)
 
 printq :: Query -> IO ()
 printq (Query bs) = S8.putStrLn bs

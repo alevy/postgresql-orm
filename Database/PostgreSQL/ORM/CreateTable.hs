@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE OverloadedStrings #-}
 
@@ -25,7 +26,6 @@ import Database.PostgreSQL.Simple
 import Database.PostgreSQL.Simple.Types
 import GHC.Generics
 
-import Data.AsTypeOf
 import Database.PostgreSQL.ORM.Model
 import Database.PostgreSQL.ORM.Association
 import Database.PostgreSQL.ORM.SqlType
@@ -42,7 +42,7 @@ instance (GDefTypes a, GDefTypes b) => GDefTypes (a :*: b) where
 instance (GDefTypes f) => GDefTypes (M1 i c f) where
   gDefTypes ~(M1 fp) = gDefTypes fp
 
-customModelCreateStatement ::
+customModelCreateStatement :: forall a.
   (Model a, Generic a, GDefTypes (Rep a)) =>
   [(S.ByteString, S.ByteString)]
   -- ^ A list of @(@/field/@,@/type/@)@ pairs to overwrite the default
@@ -63,7 +63,7 @@ customModelCreateStatement except constraints a
   ]
   where extraneous = fst (unzip except) \\ names
         types = gDefTypes $ from a
-        info = modelInfo `gAsTypeOf` a
+        info = modelInfo :: ModelInfo a
         names = modelColumns info
         go (t:ts) (n:ns)
           | Just t' <- lookup n except = quoteIdent n <> " " <> t' : go ts ns
@@ -74,9 +74,10 @@ customModelCreateStatement except constraints a
 
 -- | Statement for creating the table corresponding to a model.  Not
 -- strict in its argument.
-modelCreateStatement :: (Model a, Generic a, GDefTypes (Rep a)) => a -> Query
+modelCreateStatement :: forall a. (Model a, Generic a, GDefTypes (Rep a))
+                     => a -> Query
 modelCreateStatement a = customModelCreateStatement except constraints a
-  where ModelCreateInfo except constraint = modelCreateInfo `gAsTypeOf` a
+  where ModelCreateInfo except constraint = modelCreateInfo :: ModelCreateInfo a
         constraints = if S.null constraint then [] else [constraint]
 
 -- | Create a the database table for a model.
