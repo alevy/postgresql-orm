@@ -121,7 +121,7 @@ instance GCombine THasMany THasOne THasMany where
   gCombine (THasMany as) (THasOne a) = THasMany (as++[a])
 
 class GCount f where gCount :: f p -> (Int, [Int])
-instance GCount THasOne where gCount _ = (1, [0])
+instance GCount THasOne where gCount  _ = (1, [0])
 instance GCount THasMany where gCount _ = (1, [0])
 instance GCount THasNone where gCount _ = (1, [])
 
