@@ -28,7 +28,7 @@ instance FromField ExtractTypeOid where
   fromField f _ = return $ ExtractTypeOid $ typeOid f
 
 -- | Retreive the 'Oid' corresponding to a type.  You can subsequently
--- use the 'Oid' to call 'getTypeInfo' for more informaiton on the
+-- use the 'Oid' to call 'getTypeInfo' for more information on the
 -- type.
 getTypeOid :: Connection -> S.ByteString -> IO Oid
 getTypeOid c tname = do
@@ -39,6 +39,11 @@ getTypeOid c tname = do
 -- particular SQL type.  For most instances, you only need to define
 -- 'sqlBaseType'.
 class (ToField a, FromField a) => SqlType a where
+  sqlBaseType :: a -> S.ByteString
+  -- ^ The name of the SQL type corresponding to Haskell type @a@,
+  -- when a value of @a@ can be null.  This is the SQL type to and
+  -- from which a @'Maybe' a@ will be converted (where 'Nothing'
+  -- corresponds to the SQL value null).
   sqlType :: a -> S.ByteString
   -- ^ The name of the SQL type corresponding to Haskell type @a@,
   -- when @a@ is not wrapped in 'Maybe' and hence cannot be null.  If
@@ -46,10 +51,6 @@ class (ToField a, FromField a) => SqlType a where
   -- to 'sqlBaseType'.
   {-# INLINE sqlType #-}
   sqlType a = (sqlBaseType $ undefined `asTypeOf` a) <> " NOT NULL"
-  sqlBaseType :: a -> S.ByteString
-  -- ^ The name of the SQL type corresponding to Haskell type @a@.
-  -- This is the SQL type to and from which a @'Maybe' a@ will be
-  -- converted (where 'Nothing' corresponds to the SQL value null).
 
 #define TYPE(hs, sql) \
     instance SqlType (hs) where sqlBaseType _ = typname (sql)
