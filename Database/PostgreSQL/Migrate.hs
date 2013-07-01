@@ -101,20 +101,22 @@ runRollbackForDir dir = do
   conn <- connectEnv
   res <- query_ conn
           "select version from schema_migrations order by version desc limit 1"
-  let latestVersion = case res of
-                        [] -> ""
-                        (Only latest):_ -> latest
-  (Just (mig@(MigrationDetails _ _ name))) <-
-              getDirectoryMigrations dir >>=
-                return . (find (isVersion (== latestVersion)))
-  putStrLn $ "=== Running Rollback " ++ name
-  exitCode <- runRollback mig
-  if exitCode == ExitSuccess then do
-    putStrLn "=== Success"
-    withFile (dir </> ".." </> "schema.sql") WriteMode dumpDb
-    else do
-      putStrLn "=== Migration Failed!"
-      return exitCode
+  case res of
+    [] -> do
+      putStrLn "=== DB Fully Rolled Back!"
+      return ExitSuccess
+    (Only latest):_ -> do
+      (Just (mig@(MigrationDetails _ _ name))) <-
+                  getDirectoryMigrations dir >>=
+                    return . (find (isVersion (== latest)))
+      putStrLn $ "=== Running Rollback " ++ name
+      exitCode <- runRollback mig
+      if exitCode == ExitSuccess then do
+        putStrLn "=== Success"
+        withFile (dir </> ".." </> "schema.sql") WriteMode dumpDb
+        else do
+          putStrLn "=== Migration Failed!"
+          return exitCode
 
 -- | Run a migration. The returned exit code denotes the success or failure of
 -- the migration.
