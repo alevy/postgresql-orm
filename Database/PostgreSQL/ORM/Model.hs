@@ -135,27 +135,36 @@ instance ToField (GDBRef rt t) where
   {-# INLINE toField #-}
   toField (DBRef k) = toField k
 
--- | See 'GDBRef'.
+-- | Phantom type for instantiating 'GDBRef' that represents a one-to-many
+-- relationship between tables.
 data NormalRef = NormalRef deriving (Show, Data, Typeable)
--- | @DBRef@ is a type alias of kind @* -> *@.  The type @DBRef T@
+
+-- | A @DBRef T@ represents a one-to-many relationship between tables. For
+-- example, if type @A@ contains a @DBRef B@, then each @A@ is associated
+-- with many @B@'s. By contrast, a @'DBRefUnique'@ represents a one-to-one
+-- relationship.
+--
+-- @DBRef@ is a type alias of kind @* -> *@.  The type @DBRef T@
 -- references an instance of type @T@ by the primary key of its
--- database row.  The type argument @T@ should be an instance of
+-- database row. The type argument @T@ should be an instance of
 -- 'Model'.
 type DBRef = GDBRef NormalRef
 
--- | See 'GDBRef'.
+-- | Phantom type for instantiating 'GDBRef' that represents a one-to-one
+-- relationship between tables.
 data UniqueRef = UniqueRef deriving (Show, Data, Typeable)
--- | A @DBRefUnique T@ is like a @'DBRef' T@, but with an added
--- uniqeuness constraint.  In other words, if type @A@ contains a
--- @DBRefUnique B@, then each @B@ has one (or at most one) @A@
--- associated with it.  By contrast, if type @A@ contains a @'DBRef'
--- B@, then each @B@ may be associated with many rows of type @A@.
+
+-- | A @DBRefUnique T@ represents a one-to-one relationship between types. For
+-- example, if type @A@ contains a @DBRefUnique B@, then each @A@ is associated
+-- with one (or at most one) @B@, and each @B@ has one (or at most one) @A@
+-- associated with it.
 --
+-- By contrast, a @'DBRef'@ represents a one-to-many relationship.
+type DBRefUnique = GDBRef UniqueRef
 -- Functionally, @DBRefUnique@ and @DBRef@ are treated the same by
 -- this module.  However, other modules make a distinction.  In
 -- particular, the 'modelCreateStatement' corresponding to a
 -- 'DBRefUnique' will include a @UNIQUE@ constraint.
-type DBRefUnique = GDBRef UniqueRef
 
 -- | Create a reference to the primary key of a 'Model', suitable for
 -- storing in a 'DBRef' or 'DBRefUnique' field of a different 'Model'.
@@ -211,6 +220,17 @@ instance Show (ModelInfo a) where
       "Model", show $ modelTable a, show $ modelColumns a
     , show $ modelPrimaryColumn a , "?"]
 
+
+-- $HelperClasses
+--
+-- These classes are used internally to manipulate the 'Rep'
+-- representations of 'Generic' data structures.  You should not be
+-- defining or using these classes directly.  The names are exported
+-- so that you can include them in the context of the type signatures
+-- of your functions, should you wish to make use of the various
+-- @default@... funcitons in this file.
+
+-- | This class returns the name of a datatype.
 class GDatatypeName f where
   gDatatypeName :: f p -> String
 instance (Datatype c) => GDatatypeName (D1 c f) where 
@@ -226,6 +246,8 @@ defaultModelTable = fromString . caseFold. gDatatypeName . from
   where caseFold (h:t) = toLower h:t
         caseFold s     = s
 
+-- | This class extracts the field names of a Haskell data structure. Only
+-- defined for types with a single constructor that uses record syntax.
 class GColumns f where
   gColumns :: f p -> [S.ByteString]
 instance GColumns U1 where
@@ -241,15 +263,6 @@ instance (GColumns f) => GColumns (M1 D c f) where
 -- | Returns the Haskell field names in a data structure.
 defaultModelColumns :: (Generic a, GColumns (Rep a)) => a -> [S.ByteString]
 defaultModelColumns = gColumns . from
-
--- $HelperClasses
---
--- These classes are used internally to manipulate the 'Rep'
--- representations of 'Generic' data structures.  You should not be
--- defining or using these classes directly.  The names are exported
--- so that you can include them in the context of the type signatures
--- of your functions, should you wish to make use of the various
--- @default@... funcitons in this file.
 
 -- | This class extracts the first field in a data structure when the
 -- field is of type 'DBKey'.  If you get a compilation error because
@@ -320,6 +333,8 @@ instance (GToRow f) => GToRow (M1 i c f) where
 defaultToRow :: (Generic a, GToRow (Rep a)) => a -> [Action]
 defaultToRow = gToRow . from
 
+-- | Removes a single element from the list at the position specified.
+-- (Internal)
 deleteAt :: Int -> [a] -> [a]
 deleteAt 0 (_:t) = t
 deleteAt n (h:t) = h:deleteAt (n-1) t
