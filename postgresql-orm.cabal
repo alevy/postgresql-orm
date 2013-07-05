@@ -18,6 +18,7 @@ executable pg_migrate
                , bytestring
                , directory
                , filepath
+               , mtl
                , postgresql-simple
                , process
 
@@ -29,6 +30,7 @@ library
                , directory
                , filepath
                , ghc-prim
+               , mtl
                , postgresql-simple
                , process
                , text
