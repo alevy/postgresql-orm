@@ -94,7 +94,7 @@ runMigrationsForDir logOut dir = do
 runMigration :: MigrationDetails -> IO ExitCode
 runMigration (MigrationDetails file version _) = do
   rawSystem "runghc"
-    ["-XOverloadedStrings", file, "up", version, "--with-db-commit"]
+    [file, "up", version, "--with-db-commit"]
 
 runRollbackForDir :: FilePath -> IO ExitCode
 runRollbackForDir dir = do
@@ -123,7 +123,7 @@ runRollbackForDir dir = do
 runRollback :: MigrationDetails -> IO ExitCode
 runRollback (MigrationDetails file version _) = do
   rawSystem "runghc"
-    ["-XOverloadedStrings", file, "down", version, "--with-db-commit"]
+    [file, "down", version, "--with-db-commit"]
 
 data MigrationDetails = MigrationDetails FilePath String String deriving (Show)
 
