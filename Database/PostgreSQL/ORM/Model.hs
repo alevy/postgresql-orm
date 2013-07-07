@@ -7,6 +7,69 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE CPP #-}
 
+-- | The main database ORM interface. This module contains
+-- functionality for moving a Haskell data structure in and out of a
+-- database table.
+--
+-- The most important feature is the 'Model' class that encodes a
+-- types database interface (i.e., the ORM layer). This class has a
+-- default implementation for types that are members of the 'Generic'
+-- class (using GHC's @DeriveGeneric@ extension), provided the
+-- following conditions hold:
+--
+--   1. The data type must have a single constructor that is defined
+--      using record selector syntax.
+--
+--   2. The very first field of the data type must be a 'DBKey' to
+--      represent the primary key.  Other orders will cause a
+--      compilation error.
+--
+--   3. Every field of the data structure must be an instance of
+--      'FromField' and 'ToField'.
+--
+-- If these three conditions hold and your database naming scheme
+-- follows the conventions of 'defaultModelInfo'--namely that the
+-- table name is the same as the type name with the first character
+-- downcased, and the field names are the same as the column names--
+-- then it is reasonable to have a completely empty (default) instance
+-- declaration:
+--
+-- >   data MyType = MyType { myKey :: !DBKey
+-- >                        , myName :: !S.ByteString
+-- >                        , myCamelCase :: !Int
+-- >                        , ...
+-- >                        } deriving (Show, Generic)
+-- >   instance Model MyType
+--
+-- The default 'modelInfo' method is called 'defaultModelInfo'. You
+-- may wish to use almost all of the defaults, but tweak a few things.
+-- This is easily accomplished by overriding a few fields of the
+-- default structure. For example, suppose your database columns use
+-- exactly the same name as your Haskell field names, but the name of
+-- your database table is not the same as the name of the Haskell data
+-- type. You can override the database table name (field 'modelTable')
+-- as follows:
+--
+-- >   instance Model MyType where
+-- >       modelInfo = defaultModelInfo { modelTable = "my_type" }
+--
+-- Finally, if you dislike the conventions followed by
+-- 'defaultModelInfo', you can simply implement an alternate pattern.
+-- An example of this is 'underscoreModelInfo', which strips a prefix
+-- off every field name and converts everything from camel-case to
+-- underscore notation:
+--
+-- >   instance Model MyType where
+-- >       modelInfo = underscoreModelInfo "my"
+--
+-- The above code will associate @MyType@ with a database table
+-- @my_type@ having column names @key@, @name@, @camel_case@, etc.
+--
+-- You can implement other patterns like 'underscoreModelInfo' by
+-- calling 'defaultModelInfo' and modifying the results.
+-- Alternatively, you can directly call the lower-level functions from
+-- which 'defaultModelInfo' is built ('defaultModelTable',
+-- 'defaultModelColumns', 'defaultModelGetPrimaryKey').
 module Database.PostgreSQL.ORM.Model (
       -- * The Model class
       Model(..), ModelInfo(..), ModelIdentifiers(..), ModelQueries(..)
@@ -412,6 +475,10 @@ underscoreModelInfo prefix = def {
           where stripped | prefix `S.isPrefixOf` c = S.drop plen c
                          | otherwise               = c
 
+-- | Convert a name from camel-case to underscore notation.
+-- I.e., names of the form "MSizeForm" are changed to "MSize_From".
+-- @skipFirst@ determines if the first character should be ignored
+-- in the conversion.
 toUnderscore :: Bool -> S.ByteString -> S.ByteString
 toUnderscore skipFirst | skipFirst = S8.pack . skip . S8.unpack
                        | otherwise = S8.pack . go True . S8.unpack
@@ -482,6 +549,7 @@ defaultModelIdentifiers mi = ModelIdentifiers {
         qcols = map qcol $ modelColumns mi
         pki = modelPrimaryColumn mi
 
+-- | Standard CRUD queries on a model.
 data ModelQueries a = ModelQueries {
     modelLookupQuery :: !Query
     -- ^ A query template for looking up a model by its primary key.
@@ -505,11 +573,13 @@ data ModelQueries a = ModelQueries {
     -- row to delete.
   } deriving (Show)
 
+-- | Default SQL lookup query for a model.
 defaultModelLookupQuery :: ModelIdentifiers a -> Query
 defaultModelLookupQuery mi = Query $ S.concat [
   modelSelectFragment mi, " WHERE ", modelQPrimaryColumn mi, " = ?"
   ]
 
+-- | Default SQL update query for a model.
 defaultModelUpdateQuery :: ModelIdentifiers a -> Query
 defaultModelUpdateQuery mi = Query $ S.concat [
     "UPDATE ", modelQTable mi, " SET "
@@ -517,6 +587,7 @@ defaultModelUpdateQuery mi = Query $ S.concat [
     , " WHERE ", modelQPrimaryColumn mi, " = ?"
   ]
 
+-- | Default SQL insert query for a model.
 defaultModelInsertQuery :: ModelIdentifiers a -> Query
 defaultModelInsertQuery mi
   | null (modelQWriteColumns mi) = Query $ S.concat [
@@ -529,6 +600,7 @@ defaultModelInsertQuery mi
   , ") RETURNING ", S.intercalate ", " $ modelQColumns mi
   ]
 
+-- | Default SQL delete query for a model.
 defaultModelDeleteQuery :: ModelIdentifiers a -> Query
 defaultModelDeleteQuery mi = Query $ S.concat [
   "DELETE FROM ", modelQTable mi
@@ -555,6 +627,8 @@ data ModelCreateInfo a = ModelCreateInfo {
     -- statement.
   } deriving (Show)
 
+-- | A 'ModelCreateInfo' that doesn't imply any extra constraints or
+-- exceptions.
 emptyModelCreateInfo :: ModelCreateInfo a
 emptyModelCreateInfo = ModelCreateInfo {
     modelCreateColumnTypeExceptions = []
@@ -628,7 +702,7 @@ class Model a where
   -- structure.  Among other things, this structure specifies the name
   -- of the database table, the names of the database columns
   -- corresponding to the Haskell data structure fields, and the
-  -- position of the primary key in both the database colums and the
+  -- position of the primary key in both the database columns and the
   -- Haskell data structure.
   modelInfo :: ModelInfo a
   default modelInfo :: (Generic a, GDatatypeName (Rep a), GColumns (Rep a)
@@ -661,7 +735,7 @@ class Model a where
   -- generally look like:
   --
   -- @
-  --   -- Call 'field' as many times as ther are fields in your type
+  --   -- Call 'field' as many times as there are fields in your type
   --   modelRead = Constructor \<$> 'field' \<*> 'field' \<*> 'field'
   -- @
   modelRead :: RowParser a
@@ -670,7 +744,7 @@ class Model a where
   modelRead = defaultFromRow
 
   -- | Marshal all fields of @a@ /except/ the primary key.  As with
-  -- 'modelRead', the fields must be marshaled in the same order the
+  -- 'modelRead', the fields must be marshalled in the same order the
   -- corresponding columns are listed in 'modelColumns', only with the
   -- primary key (generally column 0) deleted.
   --
@@ -703,14 +777,16 @@ class Model a where
   modelCreateInfo :: ModelCreateInfo a
   modelCreateInfo = emptyModelCreateInfo
 
+  -- | Perform a validation of the model, returning any errors if
+  -- it is invalid.
   modelValid :: a -> [InvalidError]
   modelValid = const []
 
--- | Degemerate instances of 'Model' for types in the 'ToRow' class
+-- | Degenerate instances of 'Model' for types in the 'ToRow' class
 -- are to enable extra 'ToRow' types to be included with ':.' in the
 -- result of 'dbSelect' queries.
 degen_err :: a
-degen_err = error "Attempt to use degenrate ToRow instance as Model"
+degen_err = error "Attempt to use degenerate ToRow instance as Model"
 #define DEGENERATE(ctx,t)             \
 instance ctx => Model t where         \
   modelInfo = degen_err;              \
@@ -936,7 +1012,7 @@ instance (Model a) => ToRow (UpdateRow a) where
 -- | Dump an entire model.  Useful for development and debugging only,
 -- as every row will be read into memory before the function returns.
 --
--- Note that unlike the other primary model operations, it is okay to
+-- Note that unlike the other primary model operations, it is OK to
 -- call 'findAll' even on degenerate models such as 'As' and ':.'.
 findAll :: forall r. (Model r) => Connection -> IO [r]
 findAll c = action
@@ -1001,5 +1077,7 @@ destroyByRef :: forall a rt. (Model a) => Connection -> GDBRef rt a -> IO ()
 destroyByRef c a =
   void $ execute c (modelDeleteQuery (modelQueries :: ModelQueries a)) (Only a)
 
+-- | Print to stdout the query statement.
 printq :: Query -> IO ()
 printq (Query bs) = S8.putStrLn bs
+
