@@ -39,7 +39,8 @@ module Database.PostgreSQL.Migrations (
   , rename_column
   , change_column
     -- ** Statements
-  , create_table_stmt, add_column_stmt, drop_table_stmt, drop_column_stmt
+  , create_table_stmt, add_column_stmt, create_index_stmt
+  , drop_table_stmt, drop_column_stmt, drop_index_stmt
   , rename_column_stmt, change_column_stmt
   ) where
 
@@ -282,11 +283,21 @@ data CmdArgs = CmdArgs { cmd :: String
                        , cmdVersion :: String
                        , cmdCommit :: Bool }
 
+-- | Creates an index for efficient lookup.
+create_index :: S8.ByteString
+             -- ^ Index name
+             -> S8.ByteString
+             -- ^ Table name
+             -> [S8.ByteString]
+             -- ^ Column names
+             -> Migration Int64
+create_index = ((executeQuery_ .) .) . create_index_stmt
+
 -- | Returns a 'Query' that creates an index for the given columns on the given
 -- table. For example,
 --
 -- @
---   create_index \"post_owner_index\" \"posts\" \"owner\"
+--   create_index_stmt \"post_owner_index\" \"posts\" \"owner\"
 -- @
 --
 -- Returns the query
@@ -294,23 +305,33 @@ data CmdArgs = CmdArgs { cmd :: String
 -- @
 --   CREATE INDEX \"post_owner_index\" ON \"posts\" (\"owner\")
 -- @
-create_index :: S8.ByteString
-             -- ^ Index name
-             -> S8.ByteString
-             -- ^ Table name
-             -> [S8.ByteString]
-             -- ^ Column names
-             -> Query
-create_index indexName tableName colNames = Query $ S8.concat
+create_index_stmt :: S8.ByteString
+                  -- ^ Index name
+                  -> S8.ByteString
+                  -- ^ Table name
+                  -> [S8.ByteString]
+                  -- ^ Column names
+                  -> Query
+create_index_stmt indexName tableName colNames = Query $ S8.concat
   [ "create index \"", indexName, "\" on \"", tableName
   , "\" (", cols, ")", ";" ]
   where cols = S8.intercalate ", " $ map quote colNames
         quote x = ('"' `S8.cons` x) `S8.snoc` '"'
 
+-- | Drops an index.
+drop_index :: S8.ByteString
+           -- ^ Index name
+           -> S8.ByteString
+           -- ^ Table name
+           -> [S8.ByteString]
+           -- ^ Column names
+           -> Migration Int64
+drop_index = ((executeQuery_ .) .) . create_index_stmt
+
 -- | Returns a 'Query' that drops an index.
 --
 -- @
---   drop_index \"post_owner_index\"
+--   drop_index_stmt \"post_owner_index\"
 -- @
 --
 -- Returns the query
@@ -318,10 +339,10 @@ create_index indexName tableName colNames = Query $ S8.concat
 -- @
 --   DROP INDEX \"post_owner_index\"
 -- @
-drop_index :: S8.ByteString
-           -- ^ Index name
-           -> Query
-drop_index indexName = Query $ S8.concat
+drop_index_stmt :: S8.ByteString
+                -- ^ Index name
+                -> Query
+drop_index_stmt indexName = Query $ S8.concat
   [ "drop index \"", indexName, "\";" ]
 
 parseCmdArgs :: [String] -> Maybe CmdArgs
