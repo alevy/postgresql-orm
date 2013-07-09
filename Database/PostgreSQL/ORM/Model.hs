@@ -202,9 +202,9 @@ instance ToField (GDBRef rt t) where
 -- relationship between tables.
 data NormalRef = NormalRef deriving (Show, Data, Typeable)
 
--- | A @DBRef T@ represents a one-to-many relationship between tables. For
--- example, if type @A@ contains a @DBRef B@, then each @A@ is associated
--- with many @B@'s. By contrast, a @'DBRefUnique'@ represents a one-to-one
+-- | A @DBRef T@ represents a many-to-one relationship between tables. For
+-- example, if type @A@ contains a @DBRef B@, then each @B@ is associated
+-- with many @A@'s. By contrast, a @'DBRefUnique'@ represents a one-to-one
 -- relationship.
 --
 -- @DBRef@ is a type alias of kind @* -> *@.  The type @DBRef T@
@@ -222,7 +222,7 @@ data UniqueRef = UniqueRef deriving (Show, Data, Typeable)
 -- with one (or at most one) @B@, and each @B@ has one (or at most one) @A@
 -- associated with it.
 --
--- By contrast, a @'DBRef'@ represents a one-to-many relationship.
+-- By contrast, a @'DBRef'@ represents a many-to-one relationship.
 type DBRefUnique = GDBRef UniqueRef
 -- Functionally, @DBRefUnique@ and @DBRef@ are treated the same by
 -- this module.  However, other modules make a distinction.  In
@@ -1042,8 +1042,9 @@ save c r = do
 -- | Write a 'Model' to the database.  If the primary key is
 -- 'NullKey', the item is written with an @INSERT@ query, read back
 -- from the database, and returned with its primary key filled in.  If
--- the primary key is not 'NullKey', then the 'Model' is writen with
+-- the primary key is not 'NullKey', then the 'Model' is written with
 -- an @UPDATE@ query and returned as-is.
+--
 -- If the 'Model' is invalid (i.e. the return value of 'modelValid' is
 -- non-empty), a list of 'InvalidError' is returned instead.
 trySave :: forall r. Model r
