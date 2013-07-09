@@ -31,6 +31,7 @@ module Database.PostgreSQL.Migrations (
   , create_table
   , add_column
   , create_index
+  , create_unique_index
     -- ** Removing
   , drop_table
   , drop_column
@@ -291,7 +292,17 @@ create_index :: S8.ByteString
              -> [S8.ByteString]
              -- ^ Column names
              -> Migration Int64
-create_index = ((executeQuery_ .) .) . create_index_stmt
+create_index = ((executeQuery_ .) .) . (create_index_stmt False)
+
+-- | Creates a unique index for efficient lookup.
+create_unique_index :: S8.ByteString
+                    -- ^ Index name
+                    -> S8.ByteString
+                    -- ^ Table name
+                    -> [S8.ByteString]
+                    -- ^ Column names
+                    -> Migration Int64
+create_unique_index = ((executeQuery_ .) .) . (create_index_stmt True)
 
 -- | Returns a 'Query' that creates an index for the given columns on the given
 -- table. For example,
@@ -305,28 +316,27 @@ create_index = ((executeQuery_ .) .) . create_index_stmt
 -- @
 --   CREATE INDEX \"post_owner_index\" ON \"posts\" (\"owner\")
 -- @
-create_index_stmt :: S8.ByteString
+create_index_stmt :: Bool 
+                  -- ^ Unique index?
+                  -> S8.ByteString
                   -- ^ Index name
                   -> S8.ByteString
                   -- ^ Table name
                   -> [S8.ByteString]
                   -- ^ Column names
                   -> Query
-create_index_stmt indexName tableName colNames = Query $ S8.concat
-  [ "create index \"", indexName, "\" on \"", tableName
+create_index_stmt unq indexName tableName colNames = Query $ S8.concat
+  [ "create", unique, " index \"", indexName, "\" on \"", tableName
   , "\" (", cols, ")", ";" ]
   where cols = S8.intercalate ", " $ map quote colNames
         quote x = ('"' `S8.cons` x) `S8.snoc` '"'
+        unique = if unq then " unique" else ""
 
 -- | Drops an index.
 drop_index :: S8.ByteString
            -- ^ Index name
-           -> S8.ByteString
-           -- ^ Table name
-           -> [S8.ByteString]
-           -- ^ Column names
            -> Migration Int64
-drop_index = ((executeQuery_ .) .) . create_index_stmt
+drop_index = executeQuery_ . drop_index_stmt
 
 -- | Returns a 'Query' that drops an index.
 --
