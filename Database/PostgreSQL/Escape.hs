@@ -4,6 +4,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE UnboxedTuples #-}
 
+-- | This module deals with escaping and sanitizing SQL templates.
 module Database.PostgreSQL.Escape (
     fmtSql, quoteIdent, Id(..)
   , buildSql, buildSqlFromActions

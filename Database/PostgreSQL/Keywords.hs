@@ -1,9 +1,10 @@
-
+-- | A list of the various reserved keywords in SQL.
 module Database.PostgreSQL.Keywords where
 
+-- | A list of the various reserved keywords in SQL.
 sqlKeywords :: [String]
-sqlKeywords = [
-    "ALL"
+sqlKeywords =
+  [ "ALL"
   , "ANALYSE"
   , "ANALYZE"
   , "AND"
@@ -95,3 +96,4 @@ sqlKeywords = [
   , "WINDOW"
   , "WITH"
   ]
+
