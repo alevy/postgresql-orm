@@ -1036,8 +1036,8 @@ save :: (Model r)
 save c r = do
   eResp <- trySave c r
   case eResp of
-    Left resp -> return resp
-    Right errs -> throw $ ValidationError errs
+    Right resp -> return resp
+    Left  errs -> throw $ ValidationError errs
 
 -- | Write a 'Model' to the database.  If the primary key is
 -- 'NullKey', the item is written with an @INSERT@ query, read back
@@ -1048,15 +1048,15 @@ save c r = do
 -- If the 'Model' is invalid (i.e. the return value of 'modelValid' is
 -- non-empty), a list of 'InvalidError' is returned instead.
 trySave :: forall r. Model r
-        => Connection -> r -> IO (Either r [InvalidError])
-trySave c r | not . null $ errors = return $ Right errors
+        => Connection -> r -> IO (Either [InvalidError] r)
+trySave c r | not . null $ errors = return $ Left errors
             | NullKey <- primaryKey r = do
                   rs <- query c (modelInsertQuery qs) (InsertRow r)
-                  case rs of [r'] -> return $ Left $ lookupRow r'
+                  case rs of [r'] -> return $ Right $ lookupRow r'
                              _    -> fail "save: database did not return row"
             | otherwise = do
                   n <- execute c (modelUpdateQuery qs) (UpdateRow r)
-                  case n of 1 -> return $ Left r
+                  case n of 1 -> return $ Right r
                             _ -> fail $ "save: database updated " ++ show n
                                         ++ " records"
   where qs = modelQueries :: ModelQueries r
