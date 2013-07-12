@@ -1037,7 +1037,7 @@ save c r = do
   eResp <- trySave c r
   case eResp of
     Right resp -> return resp
-    Left  errs -> throw $ ValidationError errs
+    Left  errs -> throwIO $ ValidationError errs
 
 -- | Write a 'Model' to the database.  If the primary key is
 -- 'NullKey', the item is written with an @INSERT@ query, read back
