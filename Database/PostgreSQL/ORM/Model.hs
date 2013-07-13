@@ -11,8 +11,8 @@
 -- functionality for moving a Haskell data structure in and out of a
 -- database table.
 --
--- The most important feature is the 'Model' class that encodes a
--- types database interface (i.e., the ORM layer). This class has a
+-- The most important feature is the 'Model' class, which encodes a
+-- typed database interface (i.e., the ORM layer). This class has a
 -- default implementation for types that are members of the 'Generic'
 -- class (using GHC's @DeriveGeneric@ extension), provided the
 -- following conditions hold:
@@ -288,10 +288,10 @@ instance Show (ModelInfo a) where
 --
 -- These classes are used internally to manipulate the 'Rep'
 -- representations of 'Generic' data structures.  You should not be
--- defining or using these classes directly.  The names are exported
--- so that you can include them in the context of the type signatures
--- of your functions, should you wish to make use of the various
--- @default@... funcitons in this file.
+-- defining instances of or using these classes directly.  The names
+-- are exported so that you can include them in the context of the
+-- type signatures of your functions, should you wish to make use of
+-- the various @default@... funcitons in this file.
 
 -- | This class returns the name of a datatype.
 class GDatatypeName f where
@@ -367,9 +367,9 @@ instance (GFromRow a, GFromRow b) => GFromRow (a :*: b) where
 instance (GFromRow f) => GFromRow (M1 i c f) where
   {-# INLINE gFromRow #-}
   gFromRow = M1 <$> gFromRow
--- | This function provide as a 'fromRow' function for 'Generic'
--- types, suitable as a default of the 'FromRow' class.  This module
--- uses it as the default implementation of 'modelRead'.
+-- | This function provides a 'fromRow' function for 'Generic' types,
+-- suitable as a default of the 'FromRow' class.  This module uses it
+-- as the default implementation of 'modelRead'.
 defaultFromRow :: (Generic a, GFromRow (Rep a)) => RowParser a
 {-# INLINE defaultFromRow #-}
 defaultFromRow = to <$> gFromRow
@@ -408,9 +408,6 @@ deleteAt _ _     = []
 -- /except/ the primary key, since the primary key should never be
 -- written to a database.  Every field must be an instance of
 -- 'ToField'.
-
--- | Marshals all fields of a model /except/ the primary key (which is
--- simply skipped).
 defaultModelWrite :: forall a. (Model a, Generic a, GToRow (Rep a))
                   => a -> [Action]
 {-# INLINE defaultModelWrite #-}
@@ -549,7 +546,7 @@ defaultModelIdentifiers mi = ModelIdentifiers {
         qcols = map qcol $ modelColumns mi
         pki = modelPrimaryColumn mi
 
--- | Standard CRUD queries on a model.
+-- | Standard CRUD (create\/read\/update\/delete) queries on a model.
 data ModelQueries a = ModelQueries {
     modelLookupQuery :: !Query
     -- ^ A query template for looking up a model by its primary key.
@@ -564,9 +561,9 @@ data ModelQueries a = ModelQueries {
   , modelInsertQuery :: !Query
     -- ^ A query template for inserting a new 'Model' in the database.
     -- The query parameters are values for all columns /except/ the
-    -- primary key.  The query should return the full row as stored in
-    -- the database (including the values of fields, such as the
-    -- primary key, that have been chosen by the database server).
+    -- primary key.  The query returns the full row as stored in the
+    -- database (including the values of fields, such as the primary
+    -- key, that have been chosen by the database server).
   , modelDeleteQuery :: !Query
     -- ^ A query template for deleting a 'Model' from the database.
     -- Should have a single query parameter, namely the 'DBKey' of the
@@ -723,16 +720,16 @@ class Model a where
   {-# INLINE modelIdentifiers #-}
   modelIdentifiers = defaultModelIdentifiers modelInfo
 
-  -- | @modelRead@ and 'modelWrite' converts from a database 'query'
-  -- result to the Haskell data type of the @Model@.  Note that if
-  -- type @a@ is an instance of 'FromRow', a fine definition of
-  -- @modelRead@ is @modelRead = fromRow@.  The default is to
-  -- construct a row parser using the 'Generic' class.  However, it is
-  -- crucial that the columns be parsed in the same order they are
-  -- listed in the 'modelColumns' field of @a@'s 'ModelInfo'
-  -- structure, and this should generally be the same order they are
-  -- defined in the Haskell data structure.  Hence @modelRead@ should
-  -- generally look like:
+  -- | @modelRead@ converts from a database 'query' result to the
+  -- Haskell data type of the @Model@, namely @a@.  Note that if type
+  -- @a@ is an instance of 'FromRow', a fine definition of @modelRead@
+  -- is @modelRead = fromRow@.  The default is to construct a row
+  -- parser using the 'Generic' class.  However, it is crucial that
+  -- the columns be parsed in the same order they are listed in the
+  -- 'modelColumns' field of @a@'s 'ModelInfo' structure, and this
+  -- should generally be the same order they are defined in the
+  -- Haskell data structure.  Hence @modelRead@ should generally look
+  -- like:
   --
   -- @
   --   -- Call 'field' as many times as there are fields in your type
@@ -872,7 +869,7 @@ class RowAlias a where
   --
   -- A default implementation of @rowAliasName@ exists for unit types
   -- (as well as empty data declarations) in the 'Generic' class.  The
-  -- default converts the first character of the typename to
+  -- default converts the first character of the type name to
   -- lower-case, following the logic of 'defaultModelTable'.
   default rowAliasName :: (Generic a, GUnitType (Rep a)) =>
                           g a row -> S.ByteString
@@ -972,8 +969,8 @@ instance (Model a, RowAlias as) => Model (As as a) where
   modelQueries = error "attempt to perform standard query on AS table alias"
 
 
--- | Lookup the 'modelTable' of a 'Model' (@modelName _ =
--- 'modelTable' ('modelInfo :: ModelInfo a')@).
+-- | Lookup the 'modelTable' of a 'Model' (@modelName _ = 'modelTable'
+-- ('modelInfo' :: 'ModelInfo' a)@).
 modelName :: forall a. (Model a) => a -> S.ByteString
 {-# INLINE modelName #-}
 modelName _ = modelTable (modelInfo :: ModelInfo a)
@@ -991,7 +988,7 @@ modelSelectFragment mi = S.concat [
  "SELECT ", S.intercalate ", " $ modelQColumns mi, " FROM ", modelQTable mi ]
 
 -- | A newtype wrapper in the 'FromRow' class, permitting every model
--- to used as the result of a database query.
+-- to be used as the result of a database query.
 newtype LookupRow a = LookupRow { lookupRow :: a } deriving (Show)
 instance (Model a) => FromRow (LookupRow a) where
   fromRow = LookupRow <$> modelRead

@@ -44,7 +44,7 @@ addDirectives directives (cl:cls)
 -- | Set configuration parameters on a database by editing the
 -- @postgresql.conf@ file.  Takes the database directory and a list of
 -- @(@/parameter/@,@ /full-line/@)@ pairs.  For example, when creating
--- a throw-away database cluster, you later intend to discard, you
+-- a throw-away database cluster you later intend to discard, you
 -- might say:
 --
 -- > configLocalDB dbpath [("fsync", "fsync = off")]

@@ -36,9 +36,9 @@ import Database.PostgreSQL.Escape
 import Database.PostgreSQL.ORM.Model
 
 -- | As it's name would suggest, a @FromClause@ is the part of a query
--- between the @FROM@ keyword and the @WHERE@ keyword.  It can
--- consists of simple table names, @JOIN@ operations, and
--- parenthesized subqueries.
+-- between the @FROM@ keyword and the @WHERE@ keyword.  It can consist
+-- of simple table names, @JOIN@ operations, and parenthesized
+-- subqueries.
 --
 -- From clauses are represented in a more structured way than the
 -- other fields so as to allow the possibility of collapsing join
@@ -176,8 +176,8 @@ expressionDBSelect q = emptyDBSelect { selFields = q }
 -- | Create a 'Builder' for a rendered version of a 'DBSelect'.  This
 -- can save one string copy if you want to embed one query inside
 -- another as a subquery, as done by `dbProject'`, and thus need to
--- parenthesize it.  Hoever, the function is probably not a useful for
--- end users.
+-- parenthesize it.  However, the function is probably not a useful
+-- for end users.
 buildDBSelect :: DBSelect a -> Builder
 buildDBSelect dbs = gdbsQuery $ from dbs
 
@@ -287,11 +287,11 @@ dbSelect c dbs = map lookupRow <$> query_ c q
   where {-# NOINLINE q #-}
         q = renderDBSelect dbs
 
--- | Create a join of the 'selFields', 'selFrom', 'selJoins', and
--- 'selWhere' clauses of two 'DBSelect' queries.  Other fields are
--- simply taken from the second 'DBSelect', meaning fields such as
--- 'selWith', 'selGroupBy', and 'selOrderBy' in the in the first
--- 'DBSelect' are entirely ignored.
+-- | Create a join of the 'selFields', 'selFrom', and 'selWhere'
+-- clauses of two 'DBSelect' queries.  Other fields are simply taken
+-- from the second 'DBSelect', meaning fields such as 'selWith',
+-- 'selGroupBy', and 'selOrderBy' in the in the first 'DBSelect' are
+-- entirely ignored.
 dbJoin :: forall a b.
           (Model a, Model b) =>
           DBSelect a      -- ^ First table

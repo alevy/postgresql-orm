@@ -47,7 +47,7 @@ import Database.PostgreSQL.ORM.Model
 --  which allows you to 'addWhere' predicates mentioning columns in
 --  both @a@ and @b@.
 --
---  * Youa lready have an instance of type @a@, and want to find all
+--  * You already have an instance of type @a@, and want to find all
 --  the @b@s associated with it.  For that you use either 'assocWhere'
 --  or 'findAssoc' (which internally access fields 'assocSelectOnlyB',
 --  'assocWhereQuery', and 'assocWhereParam').  This type of query is
@@ -230,8 +230,9 @@ data GDBRefInfo reftype child parent = DBRefInfo {
     -- This should be double-quoted and table-qualified, in case the
     -- column name is a reserved keyword, contains capital letters, or
     -- conflicts with the name of a column in the joined table.  An
-    -- example would be:  @dbrefQColumn =
-    -- \"\\\"table_name\\\".\\\"column_name\\\"\"@
+    -- example would be:
+    --
+    -- > dbrefQColumn = "\"table_name\".\"column_name\""
   }
 
 instance Show (GDBRefInfo rt c p) where
@@ -437,7 +438,10 @@ jtQColumnA jt = S.concat [ jtQTable jt, ".", quoteIdent $ jtColumnA jt]
 jtQColumnB :: JoinTable a b -> S.ByteString
 jtQColumnB jt = S.concat [ jtQTable jt, ".", quoteIdent $ jtColumnB jt]
 
--- | Flip a join table.  This doesn't change the name of the table (since the 
+-- | Flip a join table.  This doesn't change the name of the table
+-- (since the same join table is used in both directions, and the
+-- default join table name glues together the two model names in
+-- alphabetical order anyway).
 jtFlip :: JoinTable a b -> JoinTable b a
 jtFlip jt = jt { jtColumnA = jtColumnB jt , jtColumnB = jtColumnA jt }
 

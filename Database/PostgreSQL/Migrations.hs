@@ -57,6 +57,8 @@ import Database.PostgreSQL.Simple.Types
 import System.Environment
 import System.Exit
 
+import Database.PostgreSQL.Escape
+
 -- | Creates a PostgreSQL 'Connection' using the /DATABASE_URL/ environment
 -- variable, if it exists. If it does, it should match the format:
 --
@@ -68,7 +70,8 @@ import System.Exit
 -- are used.
 connectEnv :: IO Connection
 connectEnv = do
-  psqlStr <- getEnvironment >>= return . (fromMaybe "") . (lookup "DATABASE_URL")
+  psqlStr <- getEnvironment >>=
+             return . (fromMaybe "") . (lookup "DATABASE_URL")
   connectPostgreSQL $ S8.pack psqlStr
 
 --
@@ -96,7 +99,7 @@ runSqlFile sqlFile = void $ do
 column :: S8.ByteString -- ^ name
        -> S8.ByteString -- ^ type, definition, constraints
        -> S8.ByteString
-column name def = S8.concat ["\"", name, "\" ", def]
+column name def = S8.concat [quoteIdent name, " ", def]
 
 -- | Creates a table. See 'column' for constructing the column list.
 create_table :: S8.ByteString
@@ -119,9 +122,9 @@ create_table_stmt :: S8.ByteString
                   -- ^ Column definitions
                   -> Query
 create_table_stmt tableName colDefs = Query $ S8.concat $
-  [ "create table \""
-  , tableName
-  , "\" ("] ++ (S8.intercalate ", " colDefs):([");"])
+  [ "create table "
+  , quoteIdent tableName
+  , " ("] ++ (S8.intercalate ", " colDefs):([");"])
 
 -- | Drops a table
 drop_table :: S8.ByteString -> Migration Int64
@@ -130,7 +133,7 @@ drop_table = executeQuery_ . drop_table_stmt
 -- | Returns a 'Query' that drops a table
 drop_table_stmt :: S8.ByteString -> Query
 drop_table_stmt tableName = Query $ S8.concat
-  [ "drop table \"", tableName, "\";"]
+  [ "drop table ", quoteIdent tableName, ";"]
 
 -- | Adds a column to the given table. For example,
 --
@@ -168,7 +171,7 @@ add_column_stmt :: S8.ByteString
                 -- ^ Column definition
                 -> Query
 add_column_stmt tableName colName colDef = Query $ S8.concat
-  [ "alter table \"" , tableName , "\" add ", column colName colDef, ";"]
+  [ "alter table ", quoteIdent tableName, " add ", column colName colDef, ";"]
 
 -- | Drops a column from the given table. For example,
 --
@@ -201,7 +204,7 @@ drop_column_stmt :: S8.ByteString
                  -- ^ Column name
                  -> Query
 drop_column_stmt tableName colName = Query $ S8.concat
-  ["alter table \"", tableName, "\" drop \"", colName, "\";"]
+  ["alter table ", quoteIdent tableName, " drop ", quoteIdent colName, ";"]
 
 -- | Renames a column in the given table. For example,
 --
@@ -238,8 +241,8 @@ rename_column_stmt :: S8.ByteString
                    -- ^ New column name
                    -> Query
 rename_column_stmt tableName colName colNameNew = Query $ S8.concat
-  [ "alter table \"", tableName, "\" rename \""
-  , colName, "\" to \"", colNameNew, "\";"]
+  [ "alter table ", quoteIdent tableName, " rename "
+  , quoteIdent colName, " to ", quoteIdent colNameNew, ";"]
 
 -- | Alters a column in the given table. For example,
 --
@@ -277,8 +280,8 @@ change_column_stmt :: S8.ByteString
                    -- ^ Action
                    -> Query
 change_column_stmt tableName colName action = Query $ S8.concat
-  [ "alter table \"", tableName, "\" alter \""
-  , colName, "\" ", action, ";"]
+  [ "alter table ", quoteIdent tableName, " alter "
+  , quoteIdent colName, " ", action, ";"]
 
 data CmdArgs = CmdArgs { cmd :: String
                        , cmdVersion :: String
@@ -326,10 +329,9 @@ create_index_stmt :: Bool
                   -- ^ Column names
                   -> Query
 create_index_stmt unq indexName tableName colNames = Query $ S8.concat
-  [ "create", unique, " index \"", indexName, "\" on \"", tableName
-  , "\" (", cols, ")", ";" ]
-  where cols = S8.intercalate ", " $ map quote colNames
-        quote x = ('"' `S8.cons` x) `S8.snoc` '"'
+  [ "create", unique, " index ", quoteIdent indexName, " on "
+  , quoteIdent tableName, " (", cols, ")", ";" ]
+  where cols = S8.intercalate ", " $ map quoteIdent colNames
         unique = if unq then " unique" else ""
 
 -- | Drops an index.
@@ -353,7 +355,7 @@ drop_index_stmt :: S8.ByteString
                 -- ^ Index name
                 -> Query
 drop_index_stmt indexName = Query $ S8.concat
-  [ "drop index \"", indexName, "\";" ]
+  [ "drop index ", quoteIdent indexName, ";" ]
 
 parseCmdArgs :: [String] -> Maybe CmdArgs
 parseCmdArgs args = do

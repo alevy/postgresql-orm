@@ -59,8 +59,9 @@ initializeDb = do
   conn <- connectEnv
   void $ execute_ conn "create table schema_migrations (version VARCHAR(28))"
 
--- | Runs all new migrations in a given directory and dumping the result schema
--- to a file \"schema.sql\" in the migrations directory.
+-- | Runs all new migrations in a given directory and dumps the
+-- resulting schema to a file \"schema.sql\" in the migrations
+-- directory.
 --
 -- Determining which migrations to run is done by querying the database for the
 -- largest version in the /schema_migrations/ table, and choosing all
