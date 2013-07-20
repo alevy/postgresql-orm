@@ -3,7 +3,7 @@ module Database.PostgreSQL.ORM (
   -- * The Model class and related types
     Model(modelInfo, modelValid), ModelInfo(..)
   , defaultModelInfo, underscoreModelInfo
-  , DBKey(..), DBRef, DBRefUnique, mkDBRef
+  , DBKey(..), DBRef, DBRefUnique, mkDBRef, primaryKey
   , (:.), As(..), RowAlias(..), fromAs
   -- ** Single-row operations
   , findRow, findAll, save, trySave, destroy, destroyByRef

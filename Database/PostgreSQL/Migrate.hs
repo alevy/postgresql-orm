@@ -6,12 +6,12 @@
 -- more tightly into their applications or utilities.
 
 module Database.PostgreSQL.Migrate
-  ( 
-     initializeDb
-  ,  runMigrationsForDir
-  ,  runRollbackForDir
-  ,  dumpDb
-  ,  defaultMigrationsDir
+  ( initializeDb
+  , runMigrationsForDir
+  , runRollbackForDir
+  , dumpDb
+  , defaultMigrationsDir
+  , MigrationDetails(..)
   ) where
 
 import Control.Monad
@@ -126,12 +126,15 @@ runRollback (MigrationDetails file version _) = do
   rawSystem "runghc"
     [file, "down", version, "--with-db-commit"]
 
-data MigrationDetails = MigrationDetails FilePath String String deriving (Show)
+data MigrationDetails = MigrationDetails { migrationPath :: FilePath
+                                         , migrationVersion :: String
+                                         , migrationName :: String }
+                                         deriving (Show)
 
 getDirectoryMigrations :: FilePath -> IO [MigrationDetails]
 getDirectoryMigrations dir = do
   files0 <- getDirectoryContents dir
-  let files = filter (('.' /=) . head) files0
+  let files = filter (('.' /=) . head) $ sort files0
   return $ map (splitFileVersionName dir) files
 
 splitFileVersionName :: FilePath -> FilePath -> MigrationDetails
