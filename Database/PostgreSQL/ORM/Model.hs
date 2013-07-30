@@ -5,6 +5,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE CPP #-}
 
 -- | The main database ORM interface. This module contains
@@ -184,7 +185,8 @@ isNullKey _       = False
 -- @GDBRef@, where @GDBRef@'s first type argument, @reftype@, is a
 -- phantom type denoting the flavor of reference ('NormalRef' or
 -- 'UniqueRef').
-newtype GDBRef reftype table = DBRef DBKeyType deriving (Eq, Data, Typeable)
+newtype GDBRef reftype table = DBRef DBKeyType
+  deriving (Eq, Data, Typeable, Num, Integral, Real, Ord, Enum, Bounded)
 
 instance (Model t) => Show (GDBRef rt t) where
   showsPrec n (DBRef k) = showsPrec n k
