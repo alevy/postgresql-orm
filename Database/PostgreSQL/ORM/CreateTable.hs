@@ -13,7 +13,7 @@
 -- than to create an actual table.  For that reason, functions
 -- creating the statements are exposed.
 module Database.PostgreSQL.ORM.CreateTable (
-  modelCreateStatement, modelCreate, GDefTypes
+  modelCreateStatement, modelCreate, GDefTypes(..)
   , jtCreateStatement, jtCreate
   ) where
 
