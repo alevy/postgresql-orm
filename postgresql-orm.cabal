@@ -3,9 +3,15 @@ version: 0.1
 cabal-version: >= 1.14
 build-type: Simple
 license: GPL
+license-file: LICENSE
 author: Amit Levy and David Mazieres
 maintainer: amit@amitlevy.com
+category: Databases
+synopsis: An ORM (Object Relational Mapping) and migrations DSL for PostgreSQL.
 data-files: man/man1/pg_migrate.1 man/man5/pg_migrate.5
+description:
+  An ORM (Object Relational Mapping) and migrations DSL for PostgreSQL. See
+  "Database.PostgreSQL.ORM" for documentation.
 
 executable pg_migrate
   default-language: Haskell2010
