@@ -31,9 +31,9 @@
 -- If these three conditions hold and your database naming scheme
 -- follows the conventions of 'defaultModelInfo'--namely that the
 -- table name is the same as the type name with the first character
--- downcased, and the field names are the same as the column names--
--- then it is reasonable to have a completely empty (default) instance
--- declaration:
+-- downcased, and the field names are the same as the column
+-- names--then it is reasonable to have a completely empty (default)
+-- instance declaration:
 --
 -- >   data MyType = MyType { myKey :: !DBKey
 -- >                        , myName :: !S.ByteString
@@ -655,9 +655,9 @@ emptyModelCreateInfo = ModelCreateInfo {
 -- If these three conditions hold and your database naming scheme
 -- follows the conventions of 'defaultModelInfo'--namely that the
 -- table name is the same as the type name with the first character
--- downcased, and the field names are the same as the column names--
--- then it is reasonable to have a completely empty (default) instance
--- declaration:
+-- downcased, and the field names are the same as the column
+-- names--then it is reasonable to have a completely empty (default)
+-- instance declaration:
 --
 -- >   data MyType = MyType { myKey :: !DBKey
 -- >                        , myName :: !S.ByteString

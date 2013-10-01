@@ -28,7 +28,7 @@ import System.FilePath
 import System.Environment
 import System.IO
 
--- | The default relative path containing migrations: \".\/dir\/migrations\"
+-- | The default relative path containing migrations: @\"db\/migrations\"@
 defaultMigrationsDir :: FilePath
 defaultMigrationsDir = "db" </> "migrations"
 
