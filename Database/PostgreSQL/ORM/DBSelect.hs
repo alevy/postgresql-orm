@@ -12,6 +12,7 @@ module Database.PostgreSQL.ORM.DBSelect (
     -- * Executing DBSelects
   , dbSelectParams, dbSelect
   , Cursor(..), curSelect, curNext
+  , dbFold, dbFoldM, dbFoldM_
   , renderDBSelect, buildDBSelect
     -- * Creating DBSelects
   , emptyDBSelect, expressionDBSelect
@@ -23,6 +24,7 @@ module Database.PostgreSQL.ORM.DBSelect (
   , addWhere_, addWhere, setOrderBy, setLimit, setOffset, addExpression
   ) where
 
+import Control.Monad.IO.Class
 import Blaze.ByteString.Builder
 import Blaze.ByteString.Builder.Char.Utf8 (fromChar)
 import qualified Data.ByteString as S
@@ -292,7 +294,8 @@ dbSelect c dbs = map lookupRow <$> query_ c q
         q = renderDBSelect dbs
 
 -- | Datatype that represents a connected cursor
-data Cursor a = Cursor { curName :: !Query
+data Cursor a = Cursor { curConn :: !Connection
+                       , curName :: !Query
                        , curChunkSize :: !Query
                        , curCache :: IORef [a] }
 
@@ -303,28 +306,60 @@ curSelect c dbs = do
   execute_ c $
     mconcat [ "DECLARE ", name, " NO SCROLL CURSOR FOR ", q ]
   cacheRef <- newIORef []
-  return $ Cursor name "256" cacheRef
+  return $ Cursor c name "256" cacheRef
   where q = renderDBSelect dbs
 
 -- | Fetch the next 'Model' for the underlying 'Cursor'. If the cache has
 -- prefetched values, dbNext will return the head of the cache without querying
 -- the database. Otherwise, it will prefetch the next 256 values, return the
 -- first, and store the rest in the cache.
-curNext :: Model a => Connection -> Cursor a -> IO (Maybe a)
-curNext c Cursor{..} = do
+curNext :: Model a => Cursor a -> IO (Maybe a)
+curNext Cursor{..} = do
   cache <- readIORef curCache
   case cache of
     x:xs -> do
       writeIORef curCache xs
       return $ Just x
     [] -> do
-      res <- map lookupRow <$> query_ c (mconcat
+      res <- map lookupRow <$> query_ curConn (mconcat
               [ "FETCH FORWARD ", curChunkSize, " FROM ", curName])
       case res of
         [] -> return Nothing
         x:xs -> do
           writeIORef curCache xs
           return $ Just x
+
+-- | Streams results of a 'DBSelect' and consumes them using a left-fold. Uses
+-- default settings for 'Cursor' (batch size is 256 rows).
+dbFold :: Model model
+       => Connection -> (b -> model -> b) -> b -> DBSelect model -> IO b
+dbFold c act initial dbs = do
+  cur <- curSelect c dbs
+  go cur initial
+  where go cur accm = do
+          mres <- curNext cur
+          case mres of
+            Nothing -> return accm
+            Just res -> go cur (act accm res)
+
+-- | Streams results of a 'DBSelect' and consumes them using a monadic
+-- left-fold. Uses default settings for 'Cursor' (batch size is 256 rows).
+dbFoldM :: (MonadIO m, Model model)
+        => Connection -> (b -> model -> m b) -> b -> DBSelect model -> m b
+dbFoldM c act initial dbs = do
+  cur <- liftIO $ curSelect c dbs
+  go cur initial
+  where go cur accm = do
+          mres <- liftIO $ curNext cur
+          case mres of
+            Nothing -> return accm
+            Just res -> act accm res >>= go cur
+
+-- | Streams results of a 'DBSelect' and consumes them using a monadic
+-- left-fold. Uses default settings for 'Cursor' (batch size is 256 rows).
+dbFoldM_ :: (MonadIO m, Model model)
+         => Connection -> (model -> m ()) -> DBSelect model -> m ()
+dbFoldM_ c act dbs = dbFoldM c (const act) () dbs
 
 -- | Create a join of the 'selFields', 'selFrom', and 'selWhere'
 -- clauses of two 'DBSelect' queries.  Other fields are simply taken
