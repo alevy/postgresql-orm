@@ -1,7 +1,6 @@
 {-# LANGUAGE TypeOperators, MultiParamTypeClasses, DeriveGeneric, OverloadedStrings #-}
 
 import Control.Exception
-import Data.AsTypeOf
 import qualified Data.ByteString as S
 import Data.Int
 import Data.Maybe
@@ -105,12 +104,12 @@ selfjoin' :: IO [(Bar,Bar)]
 selfjoin' = bracket mkc close $ \c ->
   map (\(b1 :. b2) -> (b1, fromAs X b2)) <$>
       findWhere "bar.bar_key = X.bar_parent" c ()
--}
 
 getOne :: (Model a) => DBKeyType -> IO a
 getOne k = bracket mkc close $ \c ->
   let r = fromJust <$> findRow c (DBRef k `gAsTypeOf1` r)
   in r
+-}
 
 data T1 = T1 deriving (Show, Generic)
 instance RowAlias T1
