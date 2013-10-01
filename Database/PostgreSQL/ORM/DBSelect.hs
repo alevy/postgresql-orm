@@ -4,12 +4,14 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE RecordWildCards #-}
 
 module Database.PostgreSQL.ORM.DBSelect (
     -- * The DBSelect structure
     DBSelect(..), FromClause(..)
     -- * Executing DBSelects
   , dbSelectParams, dbSelect
+  , Cursor(..), curSelect, curNext
   , renderDBSelect, buildDBSelect
     -- * Creating DBSelects
   , emptyDBSelect, expressionDBSelect
@@ -28,7 +30,9 @@ import qualified Data.ByteString.Char8 as S8
 import Data.Functor
 import Data.Monoid
 import Data.String
+import Data.IORef
 import Database.PostgreSQL.Simple
+import Database.PostgreSQL.Simple.Internal
 import Database.PostgreSQL.Simple.Types
 import GHC.Generics
 
@@ -286,6 +290,41 @@ dbSelect :: (Model a) => Connection -> DBSelect a -> IO [a]
 dbSelect c dbs = map lookupRow <$> query_ c q
   where {-# NOINLINE q #-}
         q = renderDBSelect dbs
+
+-- | Datatype that represents a connected cursor
+data Cursor a = Cursor { curName :: !Query
+                       , curChunkSize :: !Query
+                       , curCache :: IORef [a] }
+
+-- | Create a 'Cursor' for the given 'DBSelect'
+curSelect :: Model a => Connection -> DBSelect a -> IO (Cursor a)
+curSelect c dbs = do
+  name <- newTempName c
+  execute_ c $
+    mconcat [ "DECLARE ", name, " NO SCROLL CURSOR FOR ", q ]
+  cacheRef <- newIORef []
+  return $ Cursor name "256" cacheRef
+  where q = renderDBSelect dbs
+
+-- | Fetch the next 'Model' for the underlying 'Cursor'. If the cache has
+-- prefetched values, dbNext will return the head of the cache without querying
+-- the database. Otherwise, it will prefetch the next 256 values, return the
+-- first, and store the rest in the cache.
+curNext :: Model a => Connection -> Cursor a -> IO (Maybe a)
+curNext c Cursor{..} = do
+  cache <- readIORef curCache
+  case cache of
+    x:xs -> do
+      writeIORef curCache xs
+      return $ Just x
+    [] -> do
+      res <- map lookupRow <$> query_ c (mconcat
+              [ "FETCH FORWARD ", curChunkSize, " FROM ", curName])
+      case res of
+        [] -> return Nothing
+        x:xs -> do
+          writeIORef curCache xs
+          return $ Just x
 
 -- | Create a join of the 'selFields', 'selFrom', and 'selWhere'
 -- clauses of two 'DBSelect' queries.  Other fields are simply taken
