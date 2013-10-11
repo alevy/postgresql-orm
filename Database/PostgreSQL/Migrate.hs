@@ -38,9 +38,12 @@ defaultMigrationsDir = "db" </> "migrations"
 -- Therefore, /pg_dump/ must be installed on the system.
 dumpDb :: Handle -> IO ExitCode
 dumpDb outputFile = do
-  dbUrl <- getEnvironment >>= return . maybe "" id . lookup "DATABASE_URL"
-  (_, out, err, ph) <- runInteractiveProcess "pg_dump"
-                        [dbUrl, "--schema-only", "-O", "-x"] Nothing Nothing
+  let opts = ["--schema-only", "-O", "-x"]
+  env <- getEnvironment
+  let args = case lookup "DATABASE_URL" env of
+               Just dburl -> dburl:opts
+               Nothing -> opts
+  (_, out, err, ph) <- runInteractiveProcess "pg_dump" args Nothing Nothing
   exitCode <- waitForProcess ph
   if exitCode /= ExitSuccess then do
     S8.hGetContents err >>= S8.hPut stderr
@@ -57,7 +60,8 @@ dumpDb outputFile = do
 initializeDb :: IO ()
 initializeDb = do
   conn <- connectEnv
-  void $ execute_ conn "create table schema_migrations (version VARCHAR(28))"
+  void $ execute_ conn
+    "create table if not exists schema_migrations (version VARCHAR(28))"
 
 -- | Runs all new migrations in a given directory and dumps the
 -- resulting schema to a file \"schema.sql\" in the migrations
