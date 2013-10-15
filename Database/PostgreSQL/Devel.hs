@@ -61,23 +61,15 @@ configLocalDB dir directives = do
   let conf = unlines $ addDirectives directives oldconf
   length conf `seq` writeFile confpath conf
 
-pgDirectives :: FilePath -> [(String, String)]
-pgDirectives dir = [
-    ("unix_socket_directory", "unix_socket_directory = '" ++ q dir ++ "'")
-  , ("logging_collector",  "logging_collector = yes")
+pgDirectives :: [(String, String)]
+pgDirectives = [
+    ("logging_collector",  "logging_collector = yes")
   , ("listen_addresses", "listen_addresses = ''")]
-  where q ('\'':t) = "''" ++ q t
-        q (h:t)    = h : q t
-        q []       = ""
 
 -- | Create a directory for a local database cluster entirely
 -- self-contained within one directory.  This is accomplished by
 -- creating a new PostgreSQL database cluster in the directory and
 -- setting the following configuration options in @postgresql.conf@:
---
--- * @unix_socket_directory@ is set to the database directory itself,
---   so that no permissions are required on global directories such as
---   @\/var\/run@.
 --
 -- * @listen_address@ is set to empty (i.e., @\'\'@), so that no TCP
 -- socket is bound, avoiding conflicts with any other running instaces
@@ -103,7 +95,7 @@ createLocalDB dir = do
     "## IMPORTANT:  Run the following command before deleting this " ++
     "directory ##\n\n" ++
     "pg_ctl -D " ++ showCommandForUser dir' [] ++ " stop -m immediate\n\n"
-  configLocalDB dir $ pgDirectives dir'
+  configLocalDB dir $ pgDirectives
 
 systemNoStdout :: String -> [String] -> IO ExitCode
 systemNoStdout prog args =
@@ -122,7 +114,8 @@ startLocalDB dir0 = do
   dir <- canonicalizePath dir0
   (e0, _, _) <- readProcessWithExitCode "pg_ctl" ["status", "-D", dir] ""
   when (e0 /= ExitSuccess) $ do
-    e1 <- systemNoStdout "pg_ctl" ["start", "-w", "-D", dir]
+    e1 <- systemNoStdout "pg_ctl" [ "start", "-w", "-D", dir
+                                  , "-o", "\"-k " ++ dir ++ "\""]
     when (e1 /= ExitSuccess) $ fail "could not start postgres"
   return defaultConnectInfo { connectHost = dir
                             , connectUser = ""
