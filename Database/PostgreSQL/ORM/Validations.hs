@@ -1,7 +1,8 @@
-{-# LANGUAGE FlexibleContexts, DeriveDataTypeable #-}
+{-# LANGUAGE FlexibleContexts, DeriveDataTypeable, OverloadedStrings #-}
 module Database.PostgreSQL.ORM.Validations where
 
 import Control.Exception
+import Data.Aeson
 import qualified Data.Text as T
 import Data.Typeable
 import qualified Data.ByteString.Char8 as S8
@@ -9,6 +10,9 @@ import qualified Data.ByteString.Char8 as S8
 data InvalidError = InvalidError
   { invalidColumn :: !S8.ByteString
   , invalidError  :: !S8.ByteString } deriving (Show)
+
+instance ToJSON InvalidError where
+  toJSON ie = object ["column" .= invalidColumn ie, "error" .= invalidError ie]
 
 newtype ValidationError = ValidationError [InvalidError]
   deriving (Show, Typeable)

@@ -107,6 +107,7 @@ module Database.PostgreSQL.ORM.Model (
 import Control.Applicative
 import Control.Exception
 import Control.Monad
+import qualified Data.Aeson as A
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Char8 as S8
 import Data.Char
@@ -155,6 +156,10 @@ type DBKeyType = Int64
 -- to convert the `Model`'s primary key to a foreign key reference.
 data DBKey = DBKey !DBKeyType | NullKey deriving (Data, Typeable)
 
+instance A.ToJSON DBKey where
+  toJSON NullKey = A.Null
+  toJSON (DBKey k) = A.toJSON k
+
 instance Eq DBKey where
   (DBKey a) == (DBKey b) = a == b
   _         == _         = error "compare NullKey"
@@ -187,6 +192,9 @@ isNullKey _       = False
 -- 'UniqueRef').
 newtype GDBRef reftype table = DBRef DBKeyType
   deriving (Eq, Data, Typeable, Num, Integral, Real, Ord, Enum, Bounded)
+
+instance A.ToJSON (GDBRef t a) where
+  toJSON (DBRef k) = A.toJSON k
 
 instance (Model t) => Show (GDBRef rt t) where
   showsPrec n (DBRef k) = showsPrec n k
