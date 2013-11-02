@@ -1,0 +1,10 @@
+# Change Log
+
+## v0.2
+
+* Cursor interface
+
+* Aeson instances for GDBRef and DBKey
+
+* Tweak Devel module to work with postgres 9.3
+
