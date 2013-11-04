@@ -39,8 +39,8 @@ defaultMigrationsDir = "db" </> "migrations"
 dumpDb :: Handle -> IO ExitCode
 dumpDb outputFile = do
   let opts = ["--schema-only", "-O", "-x"]
-  env <- getEnvironment
-  let args = case lookup "DATABASE_URL" env of
+  e <- getEnvironment
+  let args = case lookup "DATABASE_URL" e of
                Just dburl -> dburl:opts
                Nothing -> opts
   (_, out, err, ph) <- runInteractiveProcess "pg_dump" args Nothing Nothing
