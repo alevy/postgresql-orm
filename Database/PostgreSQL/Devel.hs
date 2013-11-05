@@ -61,24 +61,25 @@ configLocalDB dir directives = do
   let conf = unlines $ addDirectives directives oldconf
   length conf `seq` writeFile confpath conf
 
+singleQuote :: String -> String
+singleQuote ('\'':t) = "''" ++ singleQuote t
+singleQuote (h:t)    = h : singleQuote t
+singleQuote []       = ""
+
+pgDirectives :: FilePath -> [(String, String)]
+pgDirectives dir = [
+    ("unix_socket_directories"
+    , "unix_socket_directories = '" ++ singleQuote dir ++ "'")
+  , ("logging_collector",  "logging_collector = yes")
+  , ("listen_addresses", "listen_addresses = ''")]
+
 pgDirectives92 :: FilePath -> [(String, String)]
-pgDirectives92 dir = [
-    ("unix_socket_directories",  "unix_socket_directories = '" ++ q dir ++ "'")
-  , ("logging_collector",  "logging_collector = yes")
-  , ("listen_addresses", "listen_addresses = ''")]
-  where q ('\'':t) = "''" ++ q t
-        q (h:t)    = h : q t
-        q []       = ""
-
-pgDirectives93 :: FilePath -> [(String, String)]
-pgDirectives93 dir = [
-    ("unix_socket_directory",  "unix_socket_directory = '" ++ q dir ++ "'")
-  , ("logging_collector",  "logging_collector = yes")
-  , ("listen_addresses", "listen_addresses = ''")]
-  where q ('\'':t) = "''" ++ q t
-        q (h:t)    = h : q t
-        q []       = ""
-
+pgDirectives92 dir = map depluralize $ pgDirectives dir
+  where depluralize ("unix_socket_directories", _) =
+          ("unix_socket_directory"
+          , "unix_socket_directory = '" ++ singleQuote dir ++ "'")
+        depluralize kv = kv
+          
 -- | Create a directory for a local database cluster entirely
 -- self-contained within one directory.  This is accomplished by
 -- creating a new PostgreSQL database cluster in the directory and
@@ -108,10 +109,10 @@ createLocalDB dir = do
     "## IMPORTANT:  Run the following command before deleting this " ++
     "directory ##\n\n" ++
     "pg_ctl -D " ++ showCommandForUser dir' [] ++ " stop -m immediate\n\n"
-  version <- read <$> readFile (dir </> "PG_VERSION") :: IO Double
-  if version < 9.3 then
-    configLocalDB dir $ pgDirectives92 dir
-    else configLocalDB dir $ pgDirectives93 dir
+  version <- readFile (dir </> "PG_VERSION")
+  case reads version of
+    [(v, _)] | v < (9.3 :: Rational) -> configLocalDB dir $ pgDirectives92 dir
+    _                                -> configLocalDB dir $ pgDirectives dir
 
 systemNoStdout :: String -> [String] -> IO ExitCode
 systemNoStdout prog args =
