@@ -79,7 +79,7 @@ pgDirectives92 dir = map depluralize $ pgDirectives dir
           ("unix_socket_directory"
           , "unix_socket_directory = '" ++ singleQuote dir ++ "'")
         depluralize kv = kv
-          
+
 -- | Create a directory for a local database cluster entirely
 -- self-contained within one directory.  This is accomplished by
 -- creating a new PostgreSQL database cluster in the directory and
