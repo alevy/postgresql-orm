@@ -16,11 +16,15 @@ main = do
     "migrate":dir:[] -> runMigrationsForDir stdout dir
     "rollback":[] -> runRollbackForDir defaultMigrationsDir
     "rollback":dir:[] -> runRollbackForDir dir
+    "new":name:[] -> newMigration name defaultMigrationsDir >>
+                      return ExitSuccess
+    "new":name:dir:[] -> newMigration name dir >> return ExitSuccess
     _ -> do
       progName <- getProgName
       putStrLn $ "Usage: " ++ progName ++ " migrate|rollback [DIRECTORY]"
       putStrLn $ "       " ++ progName ++ " init"
       putStrLn $ "       " ++ progName ++ " dump [FILE]"
+      putStrLn $ "       " ++ progName ++ " new NAME [DIRECTORY]"
       return $ ExitFailure 1
   if ec == ExitSuccess then
     return ()

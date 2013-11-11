@@ -8,7 +8,7 @@ author: Amit Levy and David Mazieres
 maintainer: amit@amitlevy.com
 category: Database
 synopsis: An ORM (Object Relational Mapping) and migrations DSL for PostgreSQL.
-data-files: man/man1/pg_migrate.1 man/man5/pg_migrate.5
+data-files: man/man1/pg_migrate.1 man/man5/pg_migrate.5 static/migration.hs
 description:
   An ORM (Object Relational Mapping) and migrations DSL for PostgreSQL. See
   "Database.PostgreSQL.ORM" for documentation.
@@ -24,8 +24,10 @@ executable pg_migrate
                , filepath
                , ghc-prim
                , mtl
+               , old-locale
                , postgresql-simple
                , process
+               , time
 
 library
   default-language: Haskell2010
@@ -37,6 +39,7 @@ library
                , filepath
                , ghc-prim
                , mtl
+               , old-locale
                , postgresql-simple
                , process
                , text

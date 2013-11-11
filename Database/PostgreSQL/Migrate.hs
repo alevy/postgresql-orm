@@ -10,12 +10,14 @@ module Database.PostgreSQL.Migrate
   , runMigrationsForDir
   , runRollbackForDir
   , dumpDb
+  , newMigration
   , defaultMigrationsDir
   , MigrationDetails(..)
   ) where
 
 import Control.Monad
 import Data.List
+import Data.Time
 import Database.PostgreSQL.Simple hiding (connect)
 import qualified Data.ByteString.Char8 as S8
 import Database.PostgreSQL.Migrations
@@ -26,7 +28,10 @@ import System.Process
 import System.Directory
 import System.FilePath
 import System.Environment
+import System.Locale
 import System.IO
+
+import Paths_postgresql_orm
 
 -- | The default relative path containing migrations: @\"db\/migrations\"@
 defaultMigrationsDir :: FilePath
@@ -97,9 +102,9 @@ runMigrationsForDir logOut dir = do
 -- | Run a migration. The returned exit code denotes the success or failure of
 -- the migration.
 runMigration :: MigrationDetails -> IO ExitCode
-runMigration (MigrationDetails file version _) = do
+runMigration (MigrationDetails file vers _) = do
   rawSystem "runghc"
-    [file, "up", version, "--with-db-commit"]
+    [file, "up", vers, "--with-db-commit"]
 
 runRollbackForDir :: FilePath -> IO ExitCode
 runRollbackForDir dir = do
@@ -126,9 +131,9 @@ runRollbackForDir dir = do
 -- | Run a migration. The returned exit code denotes the success or failure of
 -- the migration.
 runRollback :: MigrationDetails -> IO ExitCode
-runRollback (MigrationDetails file version _) = do
+runRollback (MigrationDetails file vers _) = do
   rawSystem "runghc"
-    [file, "down", version, "--with-db-commit"]
+    [file, "down", vers, "--with-db-commit"]
 
 data MigrationDetails = MigrationDetails { migrationPath :: FilePath
                                          , migrationVersion :: String
@@ -149,10 +154,18 @@ splitFileVersionName dir file =
                             "":hd:result
                             else ((chr:hd):result))
                        [""] fileName
-      version  = head parts
+      vers  = head parts
       name     = concat $ intersperse "_" $ tail parts
-  in MigrationDetails (dir </> file) version name
+  in MigrationDetails (dir </> file) vers name
 
 isVersion :: (String -> Bool) -> MigrationDetails -> Bool
 isVersion cond (MigrationDetails _ v _) = cond v
+
+newMigration :: FilePath -> FilePath -> IO ()
+newMigration baseName dir = do
+  now <- getZonedTime
+  let filePath = (formatTime defaultTimeLocale "%Y%m%d%H%M%S" now) ++
+                 "_" ++ baseName ++ ".hs"
+  origFile <- getDataFileName "static/migration.hs"
+  copyFile origFile (dir </> filePath)
 
