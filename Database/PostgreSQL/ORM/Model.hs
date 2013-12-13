@@ -160,6 +160,11 @@ instance A.ToJSON DBKey where
   toJSON NullKey = A.Null
   toJSON (DBKey k) = A.toJSON k
 
+instance A.FromJSON DBKey where
+  parseJSON (A.Number a) = return $ DBKey (floor a)
+  parseJSON A.Null = return NullKey
+  parseJSON _ = error "Expected Number or Null"
+
 instance Eq DBKey where
   (DBKey a) == (DBKey b) = a == b
   _         == _         = error "compare NullKey"
@@ -195,6 +200,10 @@ newtype GDBRef reftype table = DBRef DBKeyType
 
 instance A.ToJSON (GDBRef t a) where
   toJSON (DBRef k) = A.toJSON k
+
+instance A.FromJSON (GDBRef t a) where
+  parseJSON (A.Number n) = return $ DBRef (floor n)
+  parseJSON _ = error "Expected Number"
 
 instance (Model t) => Show (GDBRef rt t) where
   showsPrec n (DBRef k) = showsPrec n k
