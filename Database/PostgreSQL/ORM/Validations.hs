@@ -2,6 +2,7 @@
 module Database.PostgreSQL.ORM.Validations where
 
 import Control.Exception
+import Data.Aeson
 import qualified Data.HashMap.Strict as H
 import Data.Monoid
 import qualified Data.Text as T
@@ -16,6 +17,12 @@ instance Monoid ValidationError where
   mempty = ValidationError mempty
   mappend ein zwei = ValidationError $!
     H.unionWith mappend (validationErrors ein) (validationErrors zwei)
+
+instance ToJSON ValidationError where
+  toJSON = toJSON . validationErrors
+
+instance FromJSON ValidationError where
+  parseJSON val = ValidationError `fmap` parseJSON val
 
 type ValidationFunc a = a -> ValidationError
 
