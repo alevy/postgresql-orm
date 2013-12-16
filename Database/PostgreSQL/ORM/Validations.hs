@@ -2,24 +2,22 @@
 module Database.PostgreSQL.ORM.Validations where
 
 import Control.Exception
-import Data.Aeson
+import qualified Data.HashMap.Strict as H
+import Data.Monoid
 import qualified Data.Text as T
 import Data.Typeable
 
-data InvalidError = InvalidError
-  { invalidColumn :: !T.Text
-  , invalidError  :: !T.Text } deriving (Show)
-
-instance ToJSON InvalidError where
-  toJSON ie = object [ "column" .= invalidColumn ie
-                     , "error" .= invalidError ie]
-
-newtype ValidationError = ValidationError [InvalidError]
-  deriving (Show, Typeable)
+newtype ValidationError = ValidationError
+  { validationErrors :: H.HashMap T.Text [T.Text] } deriving (Show, Typeable)
 
 instance Exception ValidationError
 
-type ValidationFunc a = a -> [InvalidError]
+instance Monoid ValidationError where
+  mempty = ValidationError mempty
+  mappend ein zwei = ValidationError $!
+    H.unionWith mappend (validationErrors ein) (validationErrors zwei)
+
+type ValidationFunc a = a -> ValidationError
 
 validate :: (a -> Bool)
          -> T.Text -- ^ Column name
@@ -27,8 +25,8 @@ validate :: (a -> Bool)
          -> ValidationFunc a
 validate validator columnName desc = \a ->
   if validator a then
-    []
-    else [InvalidError columnName desc]
+    ValidationError H.empty
+    else ValidationError $ H.singleton columnName [desc]
 
 validateNotEmpty :: (a -> T.Text)
                  -> T.Text

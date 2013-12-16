@@ -113,6 +113,7 @@ import qualified Data.ByteString.Char8 as S8
 import Data.Char
 import Data.Data
 import Data.Int
+import qualified Data.HashMap.Strict as H
 import Data.Maybe
 import Data.Monoid
 import Data.List hiding (find)
@@ -795,8 +796,8 @@ class Model a where
 
   -- | Perform a validation of the model, returning any errors if
   -- it is invalid.
-  modelValid :: a -> [InvalidError]
-  modelValid = const []
+  modelValid :: a -> ValidationError
+  modelValid = const mempty
 
 -- | Degenerate instances of 'Model' for types in the 'ToRow' class
 -- are to enable extra 'ToRow' types to be included with ':.' in the
@@ -1053,7 +1054,7 @@ save c r = do
   eResp <- trySave c r
   case eResp of
     Right resp -> return resp
-    Left  errs -> throwIO $ ValidationError errs
+    Left  errs -> throwIO errs
 
 -- | Write a 'Model' to the database.  If the primary key is
 -- 'NullKey', the item is written with an @INSERT@ query, read back
@@ -1064,8 +1065,8 @@ save c r = do
 -- If the 'Model' is invalid (i.e. the return value of 'modelValid' is
 -- non-empty), a list of 'InvalidError' is returned instead.
 trySave :: forall r. Model r
-        => Connection -> r -> IO (Either [InvalidError] r)
-trySave c r | not . null $ errors = return $ Left errors
+        => Connection -> r -> IO (Either ValidationError r)
+trySave c r | not . H.null $ validationErrors errors = return $ Left errors
             | NullKey <- primaryKey r = do
                   rs <- query c (modelInsertQuery qs) (InsertRow r)
                   case rs of [r'] -> return $ Right $ lookupRow r'

@@ -19,7 +19,7 @@ module Database.PostgreSQL.ORM (
   -- ** Chaining associations
   , nestAssoc, chainAssoc
   -- ** Validations
-  , InvalidError(..), ValidationError(..), validate, validateNotEmpty
+  , ValidationError(..), validate, validateNotEmpty
   ) where
 
 import Database.PostgreSQL.ORM.Model

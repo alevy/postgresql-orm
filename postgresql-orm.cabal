@@ -1,5 +1,5 @@
 name: postgresql-orm
-version: 0.2.2
+version: 0.2.3
 cabal-version: >= 1.14
 build-type: Simple
 license: GPL
@@ -46,6 +46,7 @@ library
                , time
                , transformers
                , unix
+               , unordered-containers
                , vector
   ghc-options: -Wall -fno-warn-unused-do-bind
   exposed-modules: Data.GetField
