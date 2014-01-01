@@ -1,5 +1,10 @@
 # Change Log
 
+## v0.2.3
+
+* Simplify ValidationError to a map from field names to errors
+* Make FromJSON instances of DBKey and GDBRef
+
 ## v0.2
 
 * Cursor interface
