@@ -1,5 +1,5 @@
 name: postgresql-orm
-version: 0.2.3
+version: 0.3.0
 cabal-version: >= 1.14
 build-type: Simple
 license: GPL
@@ -25,7 +25,7 @@ executable pg_migrate
                , ghc-prim
                , mtl
                , old-locale
-               , postgresql-simple >= 0.3.2.0
+               , postgresql-simple >= 0.4.1.0
                , process
                , time
 

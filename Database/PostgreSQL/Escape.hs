@@ -6,7 +6,7 @@
 
 -- | This module deals with escaping and sanitizing SQL templates.
 module Database.PostgreSQL.Escape (
-    fmtSql, quoteIdent, Id(..)
+    fmtSql, quoteIdent
   , buildSql, buildSqlFromActions
   , buildAction, buildLiteral, buildByteA, buildIdent
   ) where
@@ -18,7 +18,6 @@ import qualified Data.ByteString as S
 import qualified Data.ByteString.Internal as S
 import qualified Data.ByteString.Unsafe as S
 import Data.Monoid
-import Data.String
 import Database.PostgreSQL.Simple
 import Database.PostgreSQL.Simple.ToField
 import Database.PostgreSQL.Simple.ToRow
@@ -136,18 +135,6 @@ buildIdent ident
 quoteIdent :: S.ByteString -> S.ByteString
 quoteIdent = toByteString . buildIdent
 
--- | An identifier is a table or column name.  When rendered into a
--- SQL query by 'fmtSql', it will be double-quoted, rather than
--- single-quoted.  For example:
---
--- >>> fmtSql "select * from ? where name = ?" (Id "MyTable", "A Name")
--- "select * from \"MyTable\" where name =  E'A Name'"
-newtype Id = Id S.ByteString deriving Show
-instance IsString Id where
-  fromString = Id . fromString
-instance ToField Id where
-  toField (Id name) = Plain $ buildIdent name
-
 hexNibblesPtr :: Ptr Word8
 {-# NOINLINE hexNibblesPtr #-}
 hexNibblesPtr = unsafeDupablePerformIO $ do
@@ -211,10 +198,11 @@ buildByteA bs = equote $
 
 
 buildAction :: Action -> Builder
-buildAction (Plain b)        = b
-buildAction (Escape bs)      = buildLiteral bs
-buildAction (EscapeByteA bs) = buildByteA bs
-buildAction (Many bs)        = mconcat $ map buildAction bs
+buildAction (Plain b)             = b
+buildAction (Escape bs)           = buildLiteral bs
+buildAction (EscapeByteA bs)      = buildByteA bs
+buildAction (EscapeIdentifier bs) = buildIdent bs
+buildAction (Many bs)             = mconcat $ map buildAction bs
 
 -- | A lower-level function used by 'buildSql' and 'fmtSql'.  You
 -- probably don't need to call it directly.
