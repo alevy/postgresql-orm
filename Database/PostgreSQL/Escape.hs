@@ -3,6 +3,9 @@
 {-# LANGUAGE MagicHash #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE UnboxedTuples #-}
+{-# LANGUAGE CPP #-}
+
+#include "MachDeps.h"
 
 -- | This module deals with escaping and sanitizing SQL templates.
 module Database.PostgreSQL.Escape (
@@ -25,7 +28,7 @@ import Database.PostgreSQL.Simple.Types
 import Foreign.Marshal.Alloc (mallocBytes)
 import Foreign.Storable (pokeByteOff)
 import Foreign.Ptr
-import GHC.Prim (Addr#, and#, geAddr#, geWord#, int2Word#
+import GHC.Prim (Addr#, and#, geAddr#, geWord#, Int#, int2Word#
                 , minusAddr#, ord# , plusAddr#, readWord8OffAddr#
                 , State# , uncheckedShiftRL#, word2Int#, writeWord8OffAddr#
                 , Word#)
@@ -33,6 +36,20 @@ import GHC.Ptr (Ptr(Ptr))
 import GHC.Types (Char(C#), Int(I#), IO(IO))
 import GHC.Word (Word8(W8#))
 import System.IO.Unsafe (unsafeDupablePerformIO)
+
+{-# INLINE cmpres #-}
+-- | Newer versions of GHC return an Int# instead of a Bool for
+-- primitive comparison functions.  The @cmpres@ function converts the
+-- result of such a comparison to a @Bool@.
+#if __GLASGOW_HASKELL__ >= 707
+cmpres :: Int# -> Bool
+cmpres 0# = False
+cmpres _ = True
+#else /* __GLASGOW_HASKELL__ < 707 */
+cmpres :: Bool -> Bool
+cmpres b = b
+#define cmpres(b) b
+#endif /* __GLASGOW_HASKELL__ < 707 */
 
 c2b :: Char -> Word8
 c2b (C# i) = W8# (int2Word# (ord# i))
@@ -47,7 +64,7 @@ fastFindIndex test bs =
     let bse = bsp0 `plusAddr#` bsl0
         check bsp = IO $ \rw -> case readWord8OffAddr# bsp 0# rw of
           (# rw1, w #) -> (# rw1, test w #)
-        go bsp | bsp `geAddr#` bse = return Nothing
+        go bsp | cmpres(bsp `geAddr#` bse) = return Nothing
                | otherwise = do
                  match <- check bsp
                  if match
@@ -168,7 +185,7 @@ buildLiteral = quoter " E'" "'" isSpecial esc
   where isSpecial 39## = True   -- '\''
         isSpecial 63## = True   -- '?'
         isSpecial 92## = True   -- '\\'
-        isSpecial b    = b `geWord#` 128##
+        isSpecial b    = cmpres(b `geWord#` 128##)
         esc b | b == c2b '\'' = copyByteString "''"
               | b == c2b '\\' = copyByteString "\\\\"
               | otherwise     = hexCharEscBuilder b
@@ -186,8 +203,8 @@ buildByteA bs = equote $
   S.unsafeUseAsCStringLen bs $ \(Ptr inptr0, I# inlen0) -> do
   let ine = plusAddr# inptr0 inlen0
       fill oute inp outp
-        | inp `geAddr#` ine = cont (BufRange (Ptr outp) (Ptr oute))
-        | plusAddr# outp 2# `geAddr#` oute = return $
+        | cmpres(inp `geAddr#` ine) = cont (BufRange (Ptr outp) (Ptr oute))
+        | cmpres(plusAddr# outp 2# `geAddr#` oute) = return $
             bufferFull (2 * (I# (ine `minusAddr#` inp)) + 1) (Ptr outp) $
             \(BufRange (Ptr bb) (Ptr be)) -> fill be inp bb
         | otherwise = do copyByteToNibbles inp outp
