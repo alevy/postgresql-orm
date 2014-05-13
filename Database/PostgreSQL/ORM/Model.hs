@@ -817,15 +817,21 @@ DEGENERATE(FromField t, [t])
 DEGENERATE((FromField a, FromField b), (a, b))
 DEGENERATE((FromField a, FromField b, FromField c), (a, b, c))
 DEGENERATE((FromField a, FromField b, FromField c, FromField d), (a, b, c, d))
-DEGENERATE((FromField a, FromField b, FromField c, FromField d, FromField e), 
+DEGENERATE((FromField a, FromField b, FromField c, FromField d, FromField e),
            (a, b, c, d, e))
 
 #undef DEGEN_ERR
 #undef DEGENERATE
 
--- | A degenerate model that lifts any model to a Maybe version that returns
--- Nothing on a parsing failure when reading from the database. Very useful for
--- performing outer joins.
+-- | A degenerate model that lifts any model to a Maybe version. Returns
+-- 'Nothing' on a parse failure. Useful, for example, for performing outer
+-- joins:
+-- @
+-- dbJoin modelDBSelect "LEFT OUTER JOIN"
+--        (addWhere 'foo = 123' $ modelDBSelect)
+--        "USING a.id = b.a_id" :: (A :. Maybe B)
+-- @
+--
 instance forall a. Model a => Model (Maybe a) where
   modelInfo = mi_a { modelGetPrimaryKey = getPrimaryKey }
     where mi_a = modelInfo :: ModelInfo a
@@ -838,8 +844,8 @@ instance forall a. Model a => Model (Maybe a) where
   modelQueries = mi_a { modelLookupQuery = modelLookupQuery mi_a }
     where mi_a = modelQueries :: ModelQueries a
 
-  modelCreateInfo = error "Attempt to use degenerate Maybe (Model a) \
-    \instance for ModelCreateInfo"
+  modelCreateInfo = error
+    "Attempt to use degenerate Maybe (Model a) instance for ModelCreateInfo"
 
   modelValid = maybe mempty modelValid
 

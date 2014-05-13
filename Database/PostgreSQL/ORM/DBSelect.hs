@@ -13,7 +13,7 @@ module Database.PostgreSQL.ORM.DBSelect (
   , dbSelectParams, dbSelect
   , Cursor(..), curSelect, curNext
   , dbFold, dbFoldM, dbFoldM_
-  , dbGroupByA
+  , dbCollect
   , renderDBSelect, buildDBSelect
     -- * Creating DBSelects
   , emptyDBSelect, expressionDBSelect
@@ -362,15 +362,16 @@ dbFoldM_ :: (MonadIO m, Model model)
          => Connection -> (model -> m ()) -> DBSelect model -> m ()
 dbFoldM_ c act dbs = dbFoldM c (const act) () dbs
 
--- | Group the returned tuples by unique a's. Expected that the query retuns
--- the a's in sorted order by ID. Useful for outer joins.
-dbGroupByA :: (Model a, Model b)
+-- | Group the returned tuples by unique a's. Expects the query to return a's
+-- in sequence -- all rows with the same value for a must be grouped together,
+-- for example, by sorting the result on a's primary key column.
+dbCollect :: (Model a, Model b)
            => Connection -> DBSelect (a :. b) -> IO [(a, [b])]
-dbGroupByA c ab = dbFold c group [] ab
+dbCollect c ab = dbFold c group [] ab
   where
     group :: (Model a, Model b) => [(a, [b])] -> (a :. b) -> [(a, [b])]
     group    []     (a :. b) = [(a, [b])]
-    group ls@(l:_)  (a :. b) | mkDBRef a /= mkDBRef (fst l) = (a, [b]):ls
+    group ls@(l:_)  (a :. b) | primaryKey a /= primaryKey (fst l) = (a, [b]):ls
     group    (l:ls) (_ :. b) = (fst l, b:(snd l)):ls
 
 -- | Create a join of the 'selFields', 'selFrom', and 'selWhere'
