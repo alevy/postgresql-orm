@@ -823,6 +823,41 @@ DEGENERATE((FromField a, FromField b, FromField c, FromField d, FromField e),
 #undef DEGEN_ERR
 #undef DEGENERATE
 
+-- | A degenerate model that lifts any model to a Maybe version that returns
+-- Nothing on a parsing failure when reading from the database. Very useful for
+-- performing outer joins.
+instance forall a. Model a => Model (Maybe a) where
+  modelInfo = mi_a { modelGetPrimaryKey = getPrimaryKey }
+    where mi_a = modelInfo :: ModelInfo a
+          getPrimaryKey Nothing  = NullKey
+          getPrimaryKey (Just a) = modelGetPrimaryKey mi_a a
+
+  modelIdentifiers = mi_a { modelQTable = modelQTable mi_a }
+    where mi_a = modelIdentifiers :: ModelIdentifiers a
+
+  modelQueries = mi_a { modelLookupQuery = modelLookupQuery mi_a }
+    where mi_a = modelQueries :: ModelQueries a
+
+  modelCreateInfo = error "Attempt to use degenerate Maybe (Model a) \
+    \instance for ModelCreateInfo"
+
+  modelValid = maybe mempty modelValid
+
+  modelWrite = maybe [] modelWrite
+
+  modelRead =
+    Just `fmap` (modelRead :: RowParser a)
+    <|> do
+      let n = length $ modelColumns (modelInfo :: ModelInfo a)
+      replicateM_ n (field :: RowParser AnyField)
+      return Nothing
+
+-- | AnyField parses (simply by consuming) any SQL column.
+data AnyField = AnyField
+
+instance FromField AnyField where
+  fromField _ _ = pure AnyField
+
 joinModelIdentifiers :: forall a b. (Model a, Model b)
                      => ModelIdentifiers (a :. b)
 joinModelIdentifiers = r
