@@ -13,6 +13,7 @@ module Database.PostgreSQL.ORM.DBSelect (
   , dbSelectParams, dbSelect
   , Cursor(..), curSelect, curNext
   , dbFold, dbFoldM, dbFoldM_
+  , dbCollect
   , renderDBSelect, buildDBSelect
     -- * Creating DBSelects
   , emptyDBSelect, expressionDBSelect
@@ -360,6 +361,18 @@ dbFoldM c act initial dbs = do
 dbFoldM_ :: (MonadIO m, Model model)
          => Connection -> (model -> m ()) -> DBSelect model -> m ()
 dbFoldM_ c act dbs = dbFoldM c (const act) () dbs
+
+-- | Group the returned tuples by unique a's. Expects the query to return a's
+-- in sequence -- all rows with the same value for a must be grouped together,
+-- for example, by sorting the result on a's primary key column.
+dbCollect :: (Model a, Model b)
+           => Connection -> DBSelect (a :. b) -> IO [(a, [b])]
+dbCollect c ab = dbFold c group [] ab
+  where
+    group :: (Model a, Model b) => [(a, [b])] -> (a :. b) -> [(a, [b])]
+    group    []     (a :. b) = [(a, [b])]
+    group ls@(l:_)  (a :. b) | primaryKey a /= primaryKey (fst l) = (a, [b]):ls
+    group    (l:ls) (_ :. b) = (fst l, b:(snd l)):ls
 
 -- | Create a join of the 'selFields', 'selFrom', and 'selWhere'
 -- clauses of two 'DBSelect' queries.  Other fields are simply taken
