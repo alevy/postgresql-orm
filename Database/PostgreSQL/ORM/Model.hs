@@ -805,12 +805,12 @@ class Model a where
 degen_err :: a
 degen_err = error "Attempt to use degenerate ToRow instance as Model"
 #define DEGENERATE(ctx,t)             \
-instance ctx => Model t where         \
+instance ctx => Model t where {       \
   modelInfo = degen_err;              \
   modelIdentifiers = degen_err;       \
   modelRead = fromRow;                \
   modelWrite _ = degen_err;           \
-  modelCreateInfo = degen_err;
+  modelCreateInfo = degen_err; }
 
 DEGENERATE(FromField t, (Only t))
 DEGENERATE(FromField t, [t])

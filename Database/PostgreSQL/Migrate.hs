@@ -23,7 +23,6 @@ import qualified Data.ByteString.Char8 as S8
 import Database.PostgreSQL.Migrations
 import System.Exit 
 import GHC.IO.Handle
-import System.Cmd
 import System.Process
 import System.Directory
 import System.FilePath
