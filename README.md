@@ -4,7 +4,7 @@ operations to PostgreSQL flavored SQL for
 Haskell types that are instances of the `Model` type-class, as well as perform
 join operations on associations between `Model` instances.
 
-## Decleration
+## Declaration
 
 Creating a `Model` in Haskell is easy. We simply declare a datatype using record
 syntax, include a field of type `DBKey` to hold the primary key and let Haskell
