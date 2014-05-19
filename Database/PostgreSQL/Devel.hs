@@ -111,8 +111,8 @@ createLocalDB dir = do
     "pg_ctl -D " ++ showCommandForUser dir' [] ++ " stop -m immediate\n\n"
   version <- readFile (dir </> "PG_VERSION")
   case reads version of
-    [(v, _)] | v < (9.3 :: Double) -> configLocalDB dir $ pgDirectives92 dir
-    _                                -> configLocalDB dir $ pgDirectives dir
+    [(v, _)] | v < (9.3 :: Double) -> configLocalDB dir $ pgDirectives92 dir'
+    _                              -> configLocalDB dir $ pgDirectives dir'
 
 systemNoStdout :: String -> [String] -> IO ExitCode
 systemNoStdout prog args =
