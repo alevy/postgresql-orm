@@ -284,14 +284,14 @@ modelDBSelect = r
 dbSelectParams :: (Model a, ToRow p) => DBSelect a -> Connection -> p -> IO [a]
 {-# INLINE dbSelectParams #-}
 dbSelectParams dbs = \c p -> map lookupRow <$> query c q p
-  where {-# NOINLINE q #-}
+  where -- {-# NOINLINE q #-} (crashes under GHC 7.8)
         q = renderDBSelect dbs
 
 -- | Run a 'DBSelect' query and return the resulting models.
 dbSelect :: (Model a) => Connection -> DBSelect a -> IO [a]
 {-# INLINE dbSelect #-}
 dbSelect c dbs = map lookupRow <$> query_ c q
-  where {-# NOINLINE q #-}
+  where -- {-# NOINLINE q #-} (crashes under GHC 7.8)
         q = renderDBSelect dbs
 
 -- | Datatype that represents a connected cursor
