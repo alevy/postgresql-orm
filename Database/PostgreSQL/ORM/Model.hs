@@ -817,7 +817,7 @@ DEGENERATE(FromField t, [t])
 DEGENERATE((FromField a, FromField b), (a, b))
 DEGENERATE((FromField a, FromField b, FromField c), (a, b, c))
 DEGENERATE((FromField a, FromField b, FromField c, FromField d), (a, b, c, d))
-DEGENERATE((FromField a, FromField b, FromField c, FromField d, FromField e),
+DEGENERATE((FromField a, FromField b, FromField c, FromField d, FromField e), \
            (a, b, c, d, e))
 
 #undef DEGEN_ERR
