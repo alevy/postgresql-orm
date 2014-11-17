@@ -1,4 +1,5 @@
 {-# LANGUAGE DeriveDataTypeable #-}
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DefaultSignatures #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
@@ -155,7 +156,7 @@ type DBKeyType = Int64
 -- If you wish to store a `Model`'s primary key as a reference in
 -- another 'Model', do not copy the 'DBKey' structure.  Use 'mkDBRef'
 -- to convert the `Model`'s primary key to a foreign key reference.
-data DBKey = DBKey !DBKeyType | NullKey deriving (Data, Typeable)
+data DBKey = DBKey !DBKeyType | NullKey deriving (Data, Typeable, Generic)
 
 instance A.ToJSON DBKey where
   toJSON NullKey = A.Null
@@ -197,7 +198,7 @@ isNullKey _       = False
 -- phantom type denoting the flavor of reference ('NormalRef' or
 -- 'UniqueRef').
 newtype GDBRef reftype table = DBRef DBKeyType
-  deriving (Eq, Data, Typeable, Num, Integral, Real, Ord, Enum, Bounded)
+  deriving (Eq, Data, Typeable, Num, Integral, Real, Ord, Enum, Bounded, Generic)
 
 instance A.ToJSON (GDBRef t a) where
   toJSON (DBRef k) = A.toJSON k
