@@ -80,7 +80,7 @@ module Database.PostgreSQL.ORM.Model (
     , DBKeyType, DBKey(..), isNullKey
     , DBRef, DBRefUnique, GDBRef(..), mkDBRef
       -- * Database operations on Models
-    , findAll, findRow, save, trySave, destroy, destroyByRef
+    , findAll, findAll', findRow, save, trySave, destroy, destroyByRef
       -- * Functions for accessing and using Models
     , modelName, primaryKey, modelSelectFragment
     , LookupRow(..), UpdateRow(..), InsertRow(..)
@@ -106,6 +106,7 @@ module Database.PostgreSQL.ORM.Model (
     ) where
 
 import Control.Applicative
+import Control.Arrow
 import Control.Exception
 import Control.Monad
 import qualified Data.Aeson as A
@@ -1073,11 +1074,19 @@ instance (Model a) => ToRow (UpdateRow a) where
 --
 -- Note that unlike the other primary model operations, it is OK to
 -- call 'findAll' even on degenerate models such as 'As' and ':.'.
-findAll :: forall r. (Model r) => Connection -> IO [r]
-findAll c = action
+findAll :: (Model r) => Connection -> IO [r]
+findAll c = findAll' c Nothing
+
+-- | Variant of 'findAll' with pagination.
+findAll' :: forall r. (Model r)
+         => Connection
+         -> Maybe (Int, Int) -- ^ OFFSET and LIMIT
+         -> IO [r]
+findAll' c range = action
   where mi = modelIdentifiers :: ModelIdentifiers r
-        q = Query $ modelSelectFragment mi
-        action = map lookupRow <$> query_ c q
+        q = Query $ S.concat [ modelSelectFragment mi , " OFFSET ? LIMIT ?" ]
+        range' = maybe (0,Nothing) (second Just) range
+        action = map lookupRow <$> query c q range'
 
 -- | Follow a 'DBRef' or 'DBRefUnique' and fetch the target row from
 -- the database into a 'Model' type @r@.
