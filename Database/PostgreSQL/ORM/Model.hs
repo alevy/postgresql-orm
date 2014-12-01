@@ -80,7 +80,7 @@ module Database.PostgreSQL.ORM.Model (
     , DBKeyType, DBKey(..), isNullKey
     , DBRef, DBRefUnique, GDBRef(..), mkDBRef
       -- * Database operations on Models
-    , findAll, findRow, save, trySave, destroy, destroyByRef
+    , findAll, findRow, save, save_, trySave, destroy, destroyByRef
       -- * Functions for accessing and using Models
     , modelName, primaryKey, modelSelectFragment
     , LookupRow(..), UpdateRow(..), InsertRow(..)
@@ -1097,6 +1097,11 @@ save c r = do
   case eResp of
     Right resp -> return resp
     Left  errs -> throwIO errs
+
+-- | 'save' but returning '()' instead of the saved model.
+save_ :: (Model r)
+      => Connection -> r -> IO ()
+save_ c r = void $ save c r
 
 -- | Write a 'Model' to the database.  If the primary key is
 -- 'NullKey', the item is written with an @INSERT@ query, read back
