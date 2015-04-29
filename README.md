@@ -1,3 +1,6 @@
+[![Hackage version](https://img.shields.io/hackage/v/postgresql-orm.svg?style=flat)](https://hackage.haskell.org/package/postgresql-orm)
+[![Build Status](https://img.shields.io/travis/alevy/postgresql-orm.svg?style=flat)](https://travis-ci.org/alevy/postgresql-orm)
+
 PostgreSQL-ORM is an Object Relational Mapper (ORM) that compliments _Simple_.
 It knows how to map high-level
 operations to PostgreSQL flavored SQL for
