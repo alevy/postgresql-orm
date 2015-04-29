@@ -128,3 +128,19 @@ with a combinator, `underscoreModelInfo` which discards a prefix of the column
 names and converts the remainder from camel-case to underscore notation (a
 common convention for naming in SQL).
 
+## Get involved!
+
+We are happy to receive bug reports, fixes, documentation enhancements,
+and other improvements.
+
+Please report bugs via the
+[github issue tracker](http://github.com/alevy/postgresql-orm/issues).
+
+Master [git repository](http://github.com/alevy/postgresql-orm):
+
+* `git clone git://github.com/alevy/postgresql-orm.git`
+
+## Licensing
+
+GPL-3 license.
+
