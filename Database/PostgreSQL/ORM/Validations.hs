@@ -1,10 +1,12 @@
-{-# LANGUAGE FlexibleContexts, DeriveDataTypeable, OverloadedStrings #-}
+{-# LANGUAGE CPP, FlexibleContexts, DeriveDataTypeable, OverloadedStrings #-}
 module Database.PostgreSQL.ORM.Validations where
 
 import Control.Exception
 import Data.Aeson
 import qualified Data.HashMap.Strict as H
+#if __GLASGOW_HASKELL__ < 710
 import Data.Monoid
+#endif
 import qualified Data.Text as T
 import Data.Typeable
 

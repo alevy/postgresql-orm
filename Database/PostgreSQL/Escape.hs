@@ -57,10 +57,17 @@ c2b (C# i) = W8# (int2Word# (ord# i))
 c2b# :: Char -> Word#
 c2b# (C# i) = int2Word# (ord# i)
 
+inlinePerformIO :: IO a -> a
+#if MIN_VERSION_bytestring(0,10,6)
+inlinePerformIO = S.accursedUnutterablePerformIO
+#else
+inlinePerformIO = S.inlinePerformIO
+#endif
+
 fastFindIndex :: (Word# -> Bool) -> S.ByteString -> Maybe Int
 {-# INLINE fastFindIndex #-}
 fastFindIndex test bs =
-  S.inlinePerformIO $ S.unsafeUseAsCStringLen bs $ \(Ptr bsp0, I# bsl0) -> do
+  inlinePerformIO $ S.unsafeUseAsCStringLen bs $ \(Ptr bsp0, I# bsl0) -> do
     let bse = bsp0 `plusAddr#` bsl0
         check bsp = IO $ \rw -> case readWord8OffAddr# bsp 0# rw of
           (# rw1, w #) -> (# rw1, test w #)
@@ -230,7 +237,7 @@ buildSqlFromActions (Query template) actions =
         intercatlate [t] []        = t
         intercatlate _ _           =
           error $ "buildSql: wrong number of parameters for " ++ show template
-        split s = case S.breakByte (c2b '?') s of
+        split s = case S.break (== c2b '?') s of
           (h,t) | S.null t  -> [fromByteString h]
                 | otherwise -> fromByteString h : split (S.unsafeTail t)
 

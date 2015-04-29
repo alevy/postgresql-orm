@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
@@ -20,7 +21,9 @@ module Database.PostgreSQL.ORM.Association (
   , nestAssoc, chainAssoc
   ) where
 
+#if __GLASGOW_HASKELL__ < 710
 import Control.Applicative
+#endif
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Char8 as S8
 import Data.List

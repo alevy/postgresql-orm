@@ -1,4 +1,5 @@
 {-# LANGUAGE Trustworthy #-}
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -30,7 +31,9 @@ import Blaze.ByteString.Builder
 import Blaze.ByteString.Builder.Char.Utf8 (fromChar)
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Char8 as S8
+#if __GLASGOW_HASKELL__ < 710
 import Data.Functor
+#endif
 import Data.Monoid
 import Data.String
 import Data.IORef
