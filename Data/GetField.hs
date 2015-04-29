@@ -1,10 +1,13 @@
 {-# LANGUAGE Safe #-}
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE DefaultSignatures #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+#if __GLASGOW_HASKELL__ < 710
 {-# LANGUAGE OverlappingInstances #-}
+#endif
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
 
@@ -157,7 +160,9 @@ class Extractor f a r g | f a r -> g where
   extractCount :: f r -> a -> (Int, [Int])
   default extractCount :: (GCount g) => f r -> a -> (Int, [Int])
   extractCount fr a = gCount (extract fr a)
-instance (TypeGCast THasNone g) => Extractor f a r g where
+instance
+  {-# OVERLAPPABLE #-}
+  (TypeGCast THasNone g) => Extractor f a r g where
   extract _ _ = typeGCast THasNone
   extractCount _ _ = gCount THasNone
 

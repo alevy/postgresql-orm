@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE CPP, OverloadedStrings #-}
 
 -- | Functions for creating and running database migrations. You should
 -- probably be using the `pg_migrate` executable to run migrations, however
@@ -27,8 +27,10 @@ import System.Process
 import System.Directory
 import System.FilePath
 import System.Environment
-import System.Locale
 import System.IO
+#if !MIN_VERSION_time(1,5,0)
+import System.Locale
+#endif
 
 import Paths_postgresql_orm
 

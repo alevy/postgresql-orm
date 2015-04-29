@@ -1,5 +1,9 @@
 # Change Log
 
+## v0.3.2
+
+* Support GHC 7.10
+
 ## v0.3.1
 
 * Generic instances of DBKey and GDBRef

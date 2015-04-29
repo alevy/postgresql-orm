@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 -- | Functions for initializing self-contained local postgreSQL
@@ -11,7 +12,9 @@ module Database.PostgreSQL.Devel (
 
 import Control.Exception
 import Control.Monad
+#if __GLASGOW_HASKELL__ < 710
 import Data.Functor
+#endif
 import Data.List
 import Database.PostgreSQL.Simple
 import System.Directory

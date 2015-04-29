@@ -1,3 +1,6 @@
+[![Hackage version](https://img.shields.io/hackage/v/postgresql-orm.svg?style=flat)](https://hackage.haskell.org/package/postgresql-orm)
+[![Build Status](https://img.shields.io/travis/alevy/postgresql-orm.svg?style=flat)](https://travis-ci.org/alevy/postgresql-orm)
+
 PostgreSQL-ORM is an Object Relational Mapper (ORM) that compliments _Simple_.
 It knows how to map high-level
 operations to PostgreSQL flavored SQL for
@@ -124,4 +127,20 @@ Of course, this task can be standardized with combinators. The library comes
 with a combinator, `underscoreModelInfo` which discards a prefix of the column
 names and converts the remainder from camel-case to underscore notation (a
 common convention for naming in SQL).
+
+## Get involved!
+
+We are happy to receive bug reports, fixes, documentation enhancements,
+and other improvements.
+
+Please report bugs via the
+[github issue tracker](http://github.com/alevy/postgresql-orm/issues).
+
+Master [git repository](http://github.com/alevy/postgresql-orm):
+
+* `git clone git://github.com/alevy/postgresql-orm.git`
+
+## Licensing
+
+GPL-3 license.
 
