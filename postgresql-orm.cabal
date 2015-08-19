@@ -73,3 +73,8 @@ library
                   , ScopedTypeVariables
                   , TypeOperators
                   , UndecidableInstances
+
+source-repository  head
+  type:         git
+  location:     https://github.com/alevy/postgresql-orm.git
+
