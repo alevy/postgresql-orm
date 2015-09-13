@@ -14,9 +14,10 @@ module Database.PostgreSQL.Escape (
   , buildAction, buildLiteral, buildByteA, buildIdent
   ) where
 
-import Blaze.ByteString.Builder
-import Blaze.ByteString.Builder.Char8 (fromChar)
-import Blaze.ByteString.Builder.Internal
+import Blaze.ByteString.Builder.Internal.Write
+import Data.ByteString.Builder
+import Data.ByteString.Builder.Internal
+import Data.ByteString.Lazy (toStrict)
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Internal as S
 import qualified Data.ByteString.Unsafe as S
@@ -89,10 +90,10 @@ quoter :: S.ByteString -> S.ByteString -> (Word# -> Bool)
           -> (Word8 -> Builder) -> S.ByteString -> Builder
 {-# INLINE quoter #-}
 quoter start end escPred escFn bs0 =
-  mconcat [copyByteString start, escaped bs0, copyByteString end]
+  mconcat [byteStringCopy start, escaped bs0, byteStringCopy end]
   where escaped bs = case fastBreak escPred bs of
-          (h, t) | S.null t  -> fromByteString h
-                 | otherwise -> fromByteString h <>
+          (h, t) | S.null t  -> byteString h
+                 | otherwise -> byteString h <>
                                 escFn (S.unsafeHead t) <>
                                 escaped (S.unsafeTail t)
 
@@ -106,7 +107,7 @@ uBuildIdent ident = quoter " U&\"" "\"" isSpecial esc ident
         isSpecial 63## = True   -- '?'
         isSpecial 92## = True   -- '\\'
         isSpecial _    = False
-        esc c = copyByteString $ case () of
+        esc c = byteStringCopy $ case () of
           _ | c == c2b '"'  -> "\"\""
             | c == c2b '?'  -> "\\003f"
             | c == c2b '\\' -> "\\\\"
@@ -114,12 +115,12 @@ uBuildIdent ident = quoter " U&\"" "\"" isSpecial esc ident
 
 -- | Build a quoted identifier.  Generally you will want to use
 -- 'quoteIdent', and for repeated use it will be faster to use
--- @'fromByteString' . 'quoteIdent'@, but this internal function is
+-- @'byteString' . 'quoteIdent'@, but this internal function is
 -- exposed in case it is useful.
 buildIdent :: S.ByteString -> Builder
 buildIdent ident
   | Just _ <- fastFindIndex isQuestionmark ident = uBuildIdent ident
-  | otherwise = quoter "\"" "\"" isDQuote (const $ copyByteString "\"\"") ident
+  | otherwise = quoter "\"" "\"" isDQuote (const $ byteStringCopy "\"\"") ident
   where isQuestionmark 63## = True
         isQuestionmark 0##  = error "quoteIdent: illegal NUL character"
         isQuestionmark _    = False
@@ -157,7 +158,7 @@ buildIdent ident
 -- See 'Id' for a convenient way to include quoted identifiers in
 -- parameter lists.
 quoteIdent :: S.ByteString -> S.ByteString
-quoteIdent = toByteString . buildIdent
+quoteIdent = toStrict . toLazyByteString . buildIdent
 
 hexNibblesPtr :: Ptr Word8
 {-# NOINLINE hexNibblesPtr #-}
@@ -193,8 +194,8 @@ buildLiteral = quoter " E'" "'" isSpecial esc
         isSpecial 63## = True   -- '?'
         isSpecial 92## = True   -- '\\'
         isSpecial b    = cmpres(b `geWord#` 128##)
-        esc b | b == c2b '\'' = copyByteString "''"
-              | b == c2b '\\' = copyByteString "\\\\"
+        esc b | b == c2b '\'' = byteStringCopy "''"
+              | b == c2b '\\' = byteStringCopy "\\\\"
               | otherwise     = hexCharEscBuilder b
 
 
@@ -206,18 +207,18 @@ copyByteToNibbles src dst = IO $ \rw0 ->
 
 buildByteA :: S.ByteString -> Builder
 buildByteA bs = equote $
-  fromBuildStepCont $ \cont (BufRange (Ptr bb0) (Ptr be0)) ->
-  S.unsafeUseAsCStringLen bs $ \(Ptr inptr0, I# inlen0) -> do
-  let ine = plusAddr# inptr0 inlen0
-      fill oute inp outp
-        | cmpres(inp `geAddr#` ine) = cont (BufRange (Ptr outp) (Ptr oute))
-        | cmpres(plusAddr# outp 2# `geAddr#` oute) = return $
-            bufferFull (2 * (I# (ine `minusAddr#` inp)) + 1) (Ptr outp) $
-            \(BufRange (Ptr bb) (Ptr be)) -> fill be inp bb
-        | otherwise = do copyByteToNibbles inp outp
-                         fill oute (inp `plusAddr#` 1#) (outp `plusAddr#` 2#)
-  fill be0 inptr0 bb0
-  where equote b = mconcat [fromByteString " E'\\\\x", b, fromChar '\'']
+  builder $ \cont (BufferRange (Ptr bb0) (Ptr be0)) ->
+    S.unsafeUseAsCStringLen bs $ \(Ptr inptr0, I# inlen0) -> do
+    let ine = plusAddr# inptr0 inlen0
+        fill oute inp outp
+          | cmpres(inp `geAddr#` ine) = cont (BufferRange (Ptr outp) (Ptr oute))
+          | cmpres(plusAddr# outp 2# `geAddr#` oute) = return $
+              bufferFull (2 * (I# (ine `minusAddr#` inp)) + 1) (Ptr outp) $
+              \(BufferRange (Ptr bb) (Ptr be)) -> fill be inp bb
+          | otherwise = do copyByteToNibbles inp outp
+                           fill oute (inp `plusAddr#` 1#) (outp `plusAddr#` 2#)
+    fill be0 inptr0 bb0
+  where equote b = mconcat [byteString " E'\\\\x", b, char8 '\'']
 
 
 
@@ -238,8 +239,8 @@ buildSqlFromActions (Query template) actions =
         intercatlate _ _           =
           error $ "buildSql: wrong number of parameters for " ++ show template
         split s = case S.break (== c2b '?') s of
-          (h,t) | S.null t  -> [fromByteString h]
-                | otherwise -> fromByteString h : split (S.unsafeTail t)
+          (h,t) | S.null t  -> [byteString h]
+                | otherwise -> byteString h : split (S.unsafeTail t)
 
 -- | A builder version of 'fmtSql', possibly useful if you are about
 -- to concatenate various individually formatted query fragments and
@@ -266,4 +267,4 @@ buildSql q p = buildSqlFromActions q (toRow p)
 -- apostrophe, when you probably wanted two strings.
 fmtSql :: (ToRow p) => Query -> p -> Query
 {-# INLINE fmtSql #-}
-fmtSql q p = Query $ toByteString $ buildSql q p
+fmtSql q p = Query $ toStrict . toLazyByteString $ buildSql q p
