@@ -20,6 +20,7 @@ executable pg_migrate
   build-depends: base < 6
                , blaze-builder >= 0.4
                , bytestring
+               , bytestring-builder
                , directory
                , filepath
                , ghc-prim
@@ -35,6 +36,7 @@ library
                , aeson
                , blaze-builder > 0.4
                , bytestring
+               , bytestring-builder
                , directory
                , filepath
                , ghc-prim
