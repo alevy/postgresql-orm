@@ -83,7 +83,7 @@ module Database.PostgreSQL.ORM.Model (
     , DBKey(..), isNullKey
     , DBRef, DBRefUnique, GDBRef(..), mkDBRef
       -- * Database operations on Models
-    , findAll, findRow, save, save_, trySave, destroy, destroyByRef
+    , findAll, findRow, destroy, destroyByRef--, save, save_, trySave
       -- * Functions for accessing and using Models
     , modelName, primaryKey, modelSelectFragment
     , LookupRow(..), UpdateRow(..), InsertRow(..)
@@ -247,10 +247,7 @@ type DBRefUnique = GDBRef UniqueRef
 -- | Create a reference to the primary key of a 'Model', suitable for
 -- storing in a 'DBRef' or 'DBRefUnique' field of a different 'Model'.
 mkDBRef :: (Model a k) => a -> GDBRef rt a k
-mkDBRef a
-  | (DBKey k) <- primaryKey a = DBRef k
-  | otherwise = error $ "mkDBRef " ++ S8.unpack (modelName a) ++ ": NullKey"
-
+mkDBRef = DBRef . primaryKey
 
 -- | A @ModelInfo T@ contains the information necessary for mapping
 -- @T@ to a database table.  Each @'Model'@ type has a single
@@ -286,7 +283,7 @@ data ModelInfo a k = ModelInfo {
     -- 'defaultModelGetPrimaryKey').  If you customize this field, you
     -- must also customize 'modelGetPrimaryKey'--no check is made that
     -- the two are consistent.
-  , modelGetPrimaryKey :: !(a -> DBKey k)
+  , modelGetPrimaryKey :: !(a -> k)
     -- ^ Return the primary key of a particular model instance.  If
     -- you customize this field, you must also customize
     -- 'modelPrimaryColumn'--no check is made that the two are
@@ -346,8 +343,8 @@ defaultModelColumns = gColumns . from
 -- field is of type 'DBKey'.  If you get a compilation error because
 -- of this class, then move the 'DBKey' first in your data structure.
 class GPrimaryKey0 f k where
-  gPrimaryKey0 :: f p -> DBKey k
-instance (RequireSelector c) => GPrimaryKey0 (S1 c (K1 i (DBKey k))) k where
+  gPrimaryKey0 :: f p -> k
+instance (RequireSelector c) => GPrimaryKey0 (S1 c (K1 i k)) k where
   {-# INLINE gPrimaryKey0 #-}
   gPrimaryKey0 (M1 (K1 k)) = k
 instance (GPrimaryKey0 a k) => GPrimaryKey0 (a :*: b) k where
@@ -364,7 +361,7 @@ instance (GPrimaryKey0 f k) => GPrimaryKey0 (D1 c f) k where
 -- 'DBKey' is the first element of the data structure.  Fails to
 -- compile if the first field is not of type 'DBKey'.
 defaultModelGetPrimaryKey :: (Generic a, GPrimaryKey0 (Rep a) k)
-                          => a -> DBKey k
+                          => a -> k
 {-# INLINE defaultModelGetPrimaryKey #-}
 defaultModelGetPrimaryKey = gPrimaryKey0 . from
 
@@ -449,7 +446,8 @@ defaultModelInfo :: forall a k.
                     (Generic a, GDatatypeName (Rep a), GColumns (Rep a)
                     , GPrimaryKey0 (Rep a) k) => ModelInfo a k
 defaultModelInfo = m
-  where m = ModelInfo { modelTable = defaultModelTable a
+  where m :: ModelInfo a k
+        m = ModelInfo { modelTable = defaultModelTable a
                       , modelColumns = defaultModelColumns a
                       , modelPrimaryColumn = 0
                       , modelGetPrimaryKey = defaultModelGetPrimaryKey
@@ -709,7 +707,7 @@ emptyModelCreateInfo = ModelCreateInfo {
 -- Alternatively, you can directly call the lower-level functions from
 -- which 'defaultModelInfo' is built ('defaultModelTable',
 -- 'defaultModelColumns', 'defaultModelGetPrimaryKey').
-class Model a k | a -> k where
+class (Eq k, ToField k, FromField k) => Model a k | a -> k where
   -- | @modelInfo@ provides information about how the Haskell data
   -- type is stored in the database, in the form of a 'ModelInfo' data
   -- structure.  Among other things, this structure specifies the name
@@ -801,7 +799,7 @@ class Model a k | a -> k where
 degen_err :: a
 degen_err = error "Attempt to use degenerate ToRow instance as Model"
 #define DEGENERATE(ctx,t)             \
-instance ctx => Model t () where {       \
+instance ctx => Model t Null where {       \
   modelInfo = degen_err;              \
   modelIdentifiers = degen_err;       \
   modelRead = fromRow;                \
@@ -828,11 +826,11 @@ DEGENERATE((FromField a, FromField b, FromField c, FromField d, FromField e), \
 --        "USING a.id = b.a_id" :: (A :. Maybe B)
 -- @
 --
-instance forall a k. Model a k => Model (Maybe a) k where
+instance forall a k. Model a k => Model (Maybe a) (Maybe k) where
   modelInfo = mi_a { modelGetPrimaryKey = getPrimaryKey }
     where mi_a = modelInfo :: ModelInfo a k
-          getPrimaryKey Nothing  = NullKey
-          getPrimaryKey (Just a) = modelGetPrimaryKey mi_a a
+          getPrimaryKey Nothing  = Nothing
+          getPrimaryKey (Just a) = Just $ modelGetPrimaryKey mi_a a
 
   modelIdentifiers = mi_a { modelQTable = modelQTable mi_a }
     where mi_a = modelIdentifiers :: ModelIdentifiers a
@@ -883,7 +881,7 @@ joinModelIdentifiers = r
 -- ':.' instance does not allow normal model operations such as
 -- 'findRow', 'save', and 'destroy'.  Attempts to use such functions
 -- will result in an exception.
-instance (Model a k1, Model b k2) => Model (a :. b) (k1, k2) where
+instance (Model a k1, Model b k2) => Model (a :. b) Null where
   modelInfo = error "attempt to access ModelInfo of join type :."
   modelIdentifiers = joinModelIdentifiers
   modelRead = (:.) <$> modelRead <*> modelRead
@@ -1033,7 +1031,7 @@ modelName :: forall a k. (Model a k) => a -> S.ByteString
 modelName _ = modelTable (modelInfo :: ModelInfo a k)
 
 -- | Lookup the primary key of a 'Model'.
-primaryKey :: (Model a k) => a -> DBKey k
+primaryKey :: (Model a k) => a -> k
 {-# INLINE primaryKey #-}
 primaryKey a = modelGetPrimaryKey modelInfo a
 
@@ -1084,43 +1082,43 @@ findRow c k = action
                     case rs of [r] -> return $ Just $ lookupRow $ r
                                _   -> return Nothing
 
--- | Like 'trySave' but instead of returning an 'Either', throws a
--- 'ValidationError' if the 'Model' is invalid.
-save :: (ToField k, Model r k)
-     => Connection -> r -> IO r
-save c r = do
-  eResp <- trySave c r
-  case eResp of
-    Right resp -> return resp
-    Left  errs -> throwIO errs
-
--- | 'save' but returning '()' instead of the saved model.
-save_ :: (ToField k, Model r k)
-      => Connection -> r -> IO ()
-save_ c r = void $ save c r
-
--- | Write a 'Model' to the database.  If the primary key is
--- 'NullKey', the item is written with an @INSERT@ query, read back
--- from the database, and returned with its primary key filled in.  If
--- the primary key is not 'NullKey', then the 'Model' is written with
--- an @UPDATE@ query and returned as-is.
---
--- If the 'Model' is invalid (i.e. the return value of 'modelValid' is
--- non-empty), a list of 'InvalidError' is returned instead.
-trySave :: forall r k. (ToField k, Model r k)
-        => Connection -> r -> IO (Either ValidationError r)
-trySave c r | not . H.null $ validationErrors errors = return $ Left errors
-            | NullKey <- primaryKey r = do
-                  rs <- query c (modelInsertQuery qs) (InsertRow r)
-                  case rs of [r'] -> return $ Right $ lookupRow r'
-                             _    -> fail "save: database did not return row"
-            | otherwise = do
-                  n <- execute c (modelUpdateQuery qs) (UpdateRow r)
-                  case n of 1 -> return $ Right r
-                            _ -> fail $ "save: database updated " ++ show n
-                                        ++ " records"
-  where qs = modelQueries :: ModelQueries r
-        errors = modelValid r
+-- -- | Like 'trySave' but instead of returning an 'Either', throws a
+-- -- 'ValidationError' if the 'Model' is invalid.
+-- save :: (ToField k, Model r k)
+--      => Connection -> r -> IO r
+-- save c r = do
+--   eResp <- trySave c r
+--   case eResp of
+--     Right resp -> return resp
+--     Left  errs -> throwIO errs
+-- 
+-- -- | 'save' but returning '()' instead of the saved model.
+-- save_ :: (ToField k, Model r k)
+--       => Connection -> r -> IO ()
+-- save_ c r = void $ save c r
+-- 
+-- -- | Write a 'Model' to the database.  If the primary key is
+-- -- 'NullKey', the item is written with an @INSERT@ query, read back
+-- -- from the database, and returned with its primary key filled in.  If
+-- -- the primary key is not 'NullKey', then the 'Model' is written with
+-- -- an @UPDATE@ query and returned as-is.
+-- --
+-- -- If the 'Model' is invalid (i.e. the return value of 'modelValid' is
+-- -- non-empty), a list of 'InvalidError' is returned instead.
+-- trySave :: forall r k. (ToField k, Model r k)
+--         => Connection -> r -> IO (Either ValidationError r)
+-- trySave c r | not . H.null $ validationErrors errors = return $ Left errors
+--             | NullKey <- primaryKey r = do
+--                   rs <- query c (modelInsertQuery qs) (InsertRow r)
+--                   case rs of [r'] -> return $ Right $ lookupRow r'
+--                              _    -> fail "save: database did not return row"
+--             | otherwise = do
+--                   n <- execute c (modelUpdateQuery qs) (UpdateRow r)
+--                   case n of 1 -> return $ Right r
+--                             _ -> fail $ "save: database updated " ++ show n
+--                                         ++ " records"
+--   where qs = modelQueries :: ModelQueries r
+--         errors = modelValid r
 
 -- | Remove the row corresponding to a particular data structure from
 -- the database.  This function only looks at the primary key in the
@@ -1128,10 +1126,8 @@ trySave c r | not . H.null $ validationErrors errors = return $ Left errors
 -- primary key is not set.
 destroy :: forall a k. (ToField k, Model a k) => Connection -> a -> IO ()
 destroy c a =
-  case primaryKey a of
-    NullKey -> fail "destroy: NullKey"
-    DBKey k -> void $ execute c
-               (modelDeleteQuery (modelQueries :: ModelQueries a)) (Only k)
+  void $ execute c
+    (modelDeleteQuery (modelQueries :: ModelQueries a)) (Only $ primaryKey a)
 
 -- | Remove a row from the database without fetching it first.
 destroyByRef :: forall a k rt. (ToField k, Model a k)
