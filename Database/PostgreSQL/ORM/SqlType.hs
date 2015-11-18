@@ -80,7 +80,7 @@ TYPE(Binary L.ByteString, bytea)
 
 #undef TYPE
 
-instance SqlType DBKey where
+instance SqlType (DBKey Int64) where
   sqlType _ = "bigserial UNIQUE NOT NULL PRIMARY KEY"
   sqlBaseType _ = error "DBKey should not be wrapped in type"
 
@@ -91,17 +91,17 @@ instance (SqlType a) => SqlType (Maybe a) where
 instance (Typeable a, SqlType a) => SqlType (V.Vector a) where
   sqlBaseType _ = sqlBaseType (undefined :: a) <> "[]"
 
-instance (Model a) => SqlType (DBRef a) where
+instance (SqlType k, Model a k) => SqlType (DBRef a k) where
   sqlBaseType (DBRef k) = sqlBaseType k <> ref
-    where t = modelInfo :: ModelInfo a
+    where t = modelInfo :: ModelInfo a k
           Just orig = modelOrigTable (modelIdentifiers :: ModelIdentifiers a)
           ref = S.concat [
               " REFERENCES ", quoteIdent orig, "("
               , quoteIdent (modelColumns t !! modelPrimaryColumn t), ")" ]
 
-instance (Model a) => SqlType (DBRefUnique a) where
+instance (SqlType k, Model a k) => SqlType (DBRefUnique a k) where
   sqlBaseType (DBRef k) = sqlBaseType k <> ref
-    where t = modelInfo :: ModelInfo a
+    where t = modelInfo :: ModelInfo a k
           Just orig = modelOrigTable (modelIdentifiers :: ModelIdentifiers a)
           ref = S.concat [
               " UNIQUE REFERENCES ", quoteIdent orig , "("

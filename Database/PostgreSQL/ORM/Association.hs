@@ -9,7 +9,7 @@
 module Database.PostgreSQL.ORM.Association (
     Association(..), assocProject, assocWhere, findAssoc
     -- * Associations based on parent-child relationships
-  , GDBRefInfo(..), DBRefInfo, defaultDBRefInfo, dbrefAssocs, has, belongsTo
+  , GDBRefInfo(..), DBRefInfo, dbrefAssocs-- ,has, belongsTo, defaultDBRefInfo
     -- * Join table Associations
   , JoinTable(..), defaultJoinTable, jtAssocs, joinTable
     -- ** Operations on join tables
@@ -102,12 +102,12 @@ instance Show (Association a b) where
 -- hence in the case of an @INNER JOIN@ might return rows of @b@ that
 -- should not be part of the association.  'assocSelectOnlyB' is
 -- intended for use only in conjunction with 'assocWhereQuery'.)
-assocProject :: (Model b) => Association a b -> DBSelect b
+assocProject :: (Model b k) => Association a b -> DBSelect b
 assocProject = dbProject . assocSelect
 
 -- | Returns a 'DBSelect' for all @b@s associated with a particular
 -- @a@.
-assocWhere :: (Model b) => Association a b -> a -> DBSelect b
+assocWhere :: (Model b k) => Association a b -> a -> DBSelect b
 assocWhere ab a = addWhere (assocWhereQuery ab) (assocWhereParam ab a)
                   (assocSelectOnlyB ab)
 
@@ -118,7 +118,7 @@ assocWhere ab a = addWhere (assocWhereQuery ab) (assocWhereParam ab a)
 --
 -- But if the first argument is a static association, this function
 -- may be marginally faster because it pre-renders most of the query.
-findAssoc :: (Model b) => Association a b -> Connection -> a -> IO [b]
+findAssoc :: (Model b k) => Association a b -> Connection -> a -> IO [b]
 {-# INLINE findAssoc #-}
 findAssoc assoc = \c a ->
   map lookupRow <$> query c q (assocWhereParam assoc a)
@@ -127,7 +127,7 @@ findAssoc assoc = \c a ->
             addWhere_ (assocWhereQuery assoc) $ assocSelectOnlyB assoc
 
 -- | Combine two associations into one.
-nestAssoc :: (Model a, Model b) =>
+nestAssoc :: (Model a k1, Model b k2) =>
              Association a b -> Association b c -> Association a (b :. c)
 nestAssoc ab bc = ab { assocSelect = dbNest (assocSelect ab) (assocSelect bc)
                      , assocSelectOnlyB = assocSelect bc }
@@ -170,7 +170,7 @@ nestAssoc ab bc = ab { assocSelect = dbNest (assocSelect ab) (assocSelect bc)
 -- > 
 -- > author_comments :: Association Author Comment
 -- > author_comments =  chainAssoc author_posts post_comments
-chainAssoc :: (Model a, Model b, Model c) =>
+chainAssoc :: (Model a k1, Model b k2, Model c k3) =>
               Association a b -> Association b c -> Association a c
 chainAssoc ab bc = ab { assocSelect = dbChain (assocSelect ab) (assocSelect bc)
                       , assocSelectOnlyB = dbProject $ assocSelect bc }
@@ -225,8 +225,8 @@ chainAssoc ab bc = ab { assocSelect = dbChain (assocSelect ab) (assocSelect bc)
 -- by 'defaultDBRefInfo'.  This is the recommended way to produce a
 -- @GDBRefInfo@.  (Alternatively, see 'has' and 'belongsTo' to make
 -- use of an entirely implicit @DBRefInfo@.)
-data GDBRefInfo reftype child parent = DBRefInfo {
-    dbrefSelector :: !(child -> GDBRef reftype parent)
+data GDBRefInfo reftype child parent parent_key = DBRefInfo {
+    dbrefSelector :: !(child -> GDBRef reftype parent parent_key)
     -- ^ Field selector returning a reference.
   , dbrefQColumn :: !S.ByteString
     -- ^ Literal SQL for the database column storing the reference.
@@ -238,7 +238,7 @@ data GDBRefInfo reftype child parent = DBRefInfo {
     -- > dbrefQColumn = "\"table_name\".\"column_name\""
   }
 
-instance Show (GDBRefInfo rt c p) where
+instance Show (GDBRefInfo rt c p k) where
   show ri = "DBRefInfo ? " ++ show (dbrefQColumn ri)
 
 -- | @DBRefInfo@ is a type alias for the common case that the
@@ -252,14 +252,14 @@ instance Show (GDBRefInfo rt c p) where
 type DBRefInfo = GDBRefInfo NormalRef
 
 data ExtractRef a = ExtractRef deriving (Show)
-instance Extractor ExtractRef (GDBRef rt a) (DBRef a) THasOne where
+instance Extractor ExtractRef (GDBRef rt a k) (DBRef a k) THasOne where
   extract _ (DBRef k) = THasOne $ DBRef k
-instance Extractor ExtractRef (GDBRef rt a) (DBRef (As alias a)) THasOne where
+instance Extractor ExtractRef (GDBRef rt a k) (DBRef (As alias a) k) THasOne where
   extract _ (DBRef k) = THasOne $ DBRef k
-instance Extractor ExtractRef (Maybe (GDBRef rt a)) (DBRef a) THasOne where
+instance Extractor ExtractRef (Maybe (GDBRef rt a k)) (DBRef a k) THasOne where
   extract _ (Just (DBRef k)) = THasOne $ DBRef k
   extract _ _                = error "Maybe DBRef is Nothing"
-instance Extractor ExtractRef (Maybe (GDBRef rt a)) (DBRef (As alias a))
+instance Extractor ExtractRef (Maybe (GDBRef rt a k)) (DBRef (As alias a) k)
          THasOne where
   extract _ (Just (DBRef k)) = THasOne $ DBRef k
   extract _ _                = error "Maybe DBRef is Nothing"
@@ -304,24 +304,26 @@ instance Extractor ExtractRef (Maybe (GDBRef rt a)) (DBRef (As alias a))
 -- > 
 -- > toChild :: Association (As ParentBar Bar) Bar
 -- > toChild = has
-defaultDBRefInfo :: forall child parent.
-                    (Model child, Model parent
-                    , GetField ExtractRef child (DBRef parent)) =>
-                    DBRefInfo child parent
-defaultDBRefInfo = ri
-  where extractor = (const ExtractRef :: g p -> ExtractRef (DBRef p)) ri
-        child = undefined :: child
-        childids = modelIdentifiers :: ModelIdentifiers child
-        ri = DBRefInfo {
-            dbrefSelector = getFieldVal extractor
-          , dbrefQColumn = modelQColumns childids !! getFieldPos extractor child
-          }
+-- TODO
+-- defaultDBRefInfo :: forall child kc parent kp.
+--                     (Model child kc, Model parent kp
+--                     , GetField ExtractRef child (DBRef parent kp)) =>
+--                     DBRefInfo child parent kp
+-- defaultDBRefInfo = ri
+--   where extractor = (const ExtractRef :: g kp -> ExtractRef (DBRef p kp)) ri
+--         child = undefined :: child
+--         childids = modelIdentifiers :: ModelIdentifiers child
+--         ri :: DBRefInfo child parent kp
+--         ri = DBRefInfo {
+--             dbrefSelector = getFieldVal extractor
+--           , dbrefQColumn = modelQColumns childids !! getFieldPos extractor child
+--           }
 
 -- | Generate both the child-parent and parent-child 'Association's
 -- implied by a 'GDBRefInfo'.
-dbrefAssocs :: forall child parent rt.
-               (Model child, Model parent) =>
-               GDBRefInfo rt child parent
+dbrefAssocs :: forall child kc parent kp rt.
+               (ToField kp, Model child kc, Model parent kp) =>
+               GDBRefInfo rt child parent kp
                -> (Association child parent, Association parent child)
 dbrefAssocs ri = (c_p, p_c)
   where idp = modelIdentifiers :: ModelIdentifiers parent
@@ -355,19 +357,22 @@ dbrefAssocs ri = (c_p, p_c)
 -- >
 -- > post_author :: Association Post Author
 -- > post_author = belongsTo
-has :: (Model child, Model parent, GetField ExtractRef child (DBRef parent)) =>
-       Association parent child
-has = snd $ dbrefAssocs defaultDBRefInfo
-
+-- TODO
+-- has :: (ToField kp, Model child kc, Model parent kp,
+--         GetField ExtractRef child (DBRef parent kp))
+--     => Association parent child
+-- has = snd $ dbrefAssocs defaultDBRefInfo
+-- 
 -- | The inverse of 'has'.  Short for
 --
 -- > fst $ dbrefAssocs defaultDBRefInfo
 --
 -- See an example at 'has'.
-belongsTo :: (Model child, Model parent
-             , GetField ExtractRef child (DBRef parent)) =>
-             Association child parent
-belongsTo = fst $ dbrefAssocs defaultDBRefInfo
+-- TODO
+-- belongsTo :: (ToField kp, Model child kc, Model parent kp
+--              , GetField ExtractRef child (DBRef parent kp)) =>
+--              Association child parent
+-- belongsTo = fst $ dbrefAssocs defaultDBRefInfo
 
 -- | A data structure representing a dedicated join table in the
 -- database.  A join table differs from a model in that rows do not
@@ -416,12 +421,12 @@ data JoinTable a b = JoinTable {
 -- > selfJoin :: Association Bar (As ParentBar Bar)
 -- > otherSelfJoin :: Association (As ParentBar Bar) Bar
 -- > (selfJoin, otherSelfJoin) = jtAssocs selfJoinTable
-defaultJoinTable :: forall a b. (Model a, Model b) => JoinTable a b
+defaultJoinTable :: forall a k1 b k2. (Model a k1, Model b k2) => JoinTable a b
 defaultJoinTable
   | colA == colB = error "defaultJoinTable has default for self joins"
   | otherwise = jti
-  where a = modelInfo :: ModelInfo a
-        b = modelInfo :: ModelInfo b
+  where a = modelInfo :: ModelInfo a k1
+        b = modelInfo :: ModelInfo b k2
         colA = S.intercalate "_"
                [modelTable a, modelColumns a !! modelPrimaryColumn a]
         colB = S.intercalate "_"
@@ -462,7 +467,8 @@ jtAddStatement jt = Query $ S.concat [
 
 -- | Add an association between two models to a join table.  Returns
 -- 'True' if the association was not already there.
-jtAdd :: (Model a, Model b) => JoinTable a b -> Connection -> a -> b -> IO Bool
+jtAdd :: (ToField k1, ToField k2, Model a k1, Model b k2)
+      => JoinTable a b -> Connection -> a -> b -> IO Bool
 {-# INLINE jtAdd #-}
 jtAdd jt = \c a b -> (/= 0) <$> execute c q (jtParam jt a b)
   where {-# NOINLINE q #-}
@@ -478,7 +484,7 @@ jtRemoveStatement jt = Query $ S.concat [
 
 -- | Remove an association from a join table.  Returns 'True' if the
 -- association was previously there.
-jtRemove :: (Model a, Model b) =>
+jtRemove :: (ToField k1, ToField k2, Model a k1, Model b k2) =>
             JoinTable a b -> Connection -> a -> b -> IO Bool
 {-# INLINE jtRemove #-}
 jtRemove jt = \c a b -> (/= 0) <$> execute c q (jtParam jt a b)
@@ -487,8 +493,9 @@ jtRemove jt = \c a b -> (/= 0) <$> execute c q (jtParam jt a b)
 
 -- | Remove an assocation from a join table when you don't have the
 -- target instances of the two models handy, but do have references.
-jtRemoveByRef :: (Model a, Model b) => JoinTable a b
-                 -> Connection -> GDBRef rt a -> GDBRef rt b -> IO Bool
+jtRemoveByRef :: (ToField k1, ToField k2, Model a k1, Model b k2)
+              => JoinTable a b -> Connection -> GDBRef rt a k1
+              -> GDBRef rt b k2 -> IO Bool
 {-# INLINE jtRemoveByRef #-}
 jtRemoveByRef jt = \c a b -> (/= 0) <$> execute c q (a, b)
   where {-# NOINLINE q #-}
@@ -499,12 +506,14 @@ jtRemoveByRef jt = \c a b -> (/= 0) <$> execute c q (a, b)
 -- example:
 --
 -- > execute conn (jtAddStatement my_join_table) (jtParam a b)
-jtParam :: (Model a, Model b) => JoinTable a b -> a -> b -> [Action]
+jtParam :: (ToField k1, ToField k2, Model a k1, Model b k2)
+        => JoinTable a b -> a -> b -> [Action]
 jtParam _ a b = [toField $ primaryKey a, toField $ primaryKey b]
 
 -- | Generate a one-way association from a 'JoinTable'.  Use
 -- 'jtAssocs' instead.
-jtAssoc :: forall a b. (Model a, Model b) => JoinTable a b -> Association a b
+jtAssoc :: forall a k1 b k2. (ToField k1, Model a k1, Model b k2)
+        => JoinTable a b -> Association a b
 jtAssoc jt = Association {
     assocSelect = dbJoin modelDBSelect "JOIN" onlyB $ Query $ S.concat [
        "ON ", priA, " = ", jtQColumnA jt]
@@ -523,7 +532,7 @@ jtAssoc jt = Association {
         onlyB = selB { selFrom = fromB }
 
 -- | Generate the two associations implied by a 'JoinTable'.
-jtAssocs :: (Model a, Model b) =>
+jtAssocs :: (ToField k1, ToField k2, Model a k1, Model b k2) =>
             JoinTable a b -> (Association a b, Association b a)
 jtAssocs jt = (jtAssoc jt, jtAssoc $ jtFlip jt)
 
@@ -539,5 +548,5 @@ jtAssocs jt = (jtAssoc jt, jtAssoc $ jtFlip jt)
 -- >
 -- > bToA :: Association B A
 -- > bToA = joinTable
-joinTable :: (Model a, Model b) => Association a b
+joinTable :: (ToField k1, Model a k1, Model b k2) => Association a b
 joinTable = jtAssoc defaultJoinTable

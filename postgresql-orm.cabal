@@ -60,7 +60,7 @@ library
                  , Database.PostgreSQL.Migrations
                  , Database.PostgreSQL.ORM
                  , Database.PostgreSQL.ORM.Association
-                 , Database.PostgreSQL.ORM.CreateTable
+                 --, Database.PostgreSQL.ORM.CreateTable
                  , Database.PostgreSQL.ORM.DBSelect
                  , Database.PostgreSQL.ORM.Model
                  , Database.PostgreSQL.ORM.SqlType

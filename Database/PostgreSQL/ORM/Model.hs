@@ -1,12 +1,15 @@
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DefaultSignatures #-}
+{-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE CPP #-}
 
 -- | The main database ORM interface. This module contains
@@ -77,7 +80,7 @@ module Database.PostgreSQL.ORM.Model (
       Model(..), ModelInfo(..), ModelIdentifiers(..), ModelQueries(..)
     , underscoreModelInfo
       -- * Data types for holding primary keys
-    , DBKeyType, DBKey(..), isNullKey
+    , DBKey(..), isNullKey
     , DBRef, DBRefUnique, GDBRef(..), mkDBRef
       -- * Database operations on Models
     , findAll, findRow, save, save_, trySave, destroy, destroyByRef
@@ -113,7 +116,6 @@ import qualified Data.ByteString as S
 import qualified Data.ByteString.Char8 as S8
 import Data.Char
 import Data.Data
-import Data.Int
 import qualified Data.HashMap.Strict as H
 import Data.Maybe
 import Data.Monoid
@@ -130,12 +132,6 @@ import GHC.Generics
 
 import Data.RequireSelector
 import Database.PostgreSQL.Escape (quoteIdent)
-
--- | A type large enough to hold database primary keys.  Do not use
--- this type directly in your data structures.  Use 'DBKey' to hold a
--- `Model`'s primary key and 'DBRef' to reference the primary key of
--- another model.
-type DBKeyType = Int64
 
 -- | The type of the Haskell data structure field containing a model's
 -- primary key.
@@ -156,37 +152,36 @@ type DBKeyType = Int64
 -- If you wish to store a `Model`'s primary key as a reference in
 -- another 'Model', do not copy the 'DBKey' structure.  Use 'mkDBRef'
 -- to convert the `Model`'s primary key to a foreign key reference.
-data DBKey = DBKey !DBKeyType | NullKey deriving (Data, Typeable, Generic)
+data DBKey k = DBKey !k | NullKey deriving (Data, Typeable, Generic)
 
-instance A.ToJSON DBKey where
+instance A.ToJSON k => A.ToJSON (DBKey k) where
   toJSON NullKey = A.Null
   toJSON (DBKey k) = A.toJSON k
 
-instance A.FromJSON DBKey where
-  parseJSON (A.Number a) = return $ DBKey (floor a)
+instance A.FromJSON k => A.FromJSON (DBKey k) where
   parseJSON A.Null = return NullKey
-  parseJSON _ = error "Expected Number or Null"
+  parseJSON k = DBKey `fmap` A.parseJSON k
 
-instance Eq DBKey where
+instance Eq k => Eq (DBKey k) where
   (DBKey a) == (DBKey b) = a == b
   _         == _         = error "compare NullKey"
-instance Ord DBKey where
+instance Ord k => Ord (DBKey k) where
   compare (DBKey a) (DBKey b) = compare a b
   compare _ _                 = error "compare NullKey"
 
-instance Show DBKey where
+instance Show k => Show (DBKey k) where
   showsPrec n (DBKey k) = showsPrec n k
   showsPrec _ NullKey   = ("NullKey" ++)
 
-instance FromField DBKey where
+instance FromField k => FromField (DBKey k) where
   fromField _ Nothing = pure NullKey
   fromField f bs      = DBKey <$> fromField f bs
-instance ToField DBKey where
+instance ToField k => ToField (DBKey k) where
   toField (DBKey k) = toField k
   toField NullKey   = toField Null
 
 -- | Returns 'True' when a 'DBKey' is 'NullKey'.
-isNullKey :: DBKey -> Bool
+isNullKey :: DBKey k -> Bool
 isNullKey NullKey = True
 isNullKey _       = False
 
@@ -197,25 +192,24 @@ isNullKey _       = False
 -- @GDBRef@, where @GDBRef@'s first type argument, @reftype@, is a
 -- phantom type denoting the flavor of reference ('NormalRef' or
 -- 'UniqueRef').
-newtype GDBRef reftype table = DBRef DBKeyType
+newtype GDBRef reftype table key = DBRef key
   deriving (Eq, Data, Typeable, Num, Integral, Real, Ord, Enum, Bounded, Generic)
 
-instance A.ToJSON (GDBRef t a) where
+instance A.ToJSON k => A.ToJSON (GDBRef t a k) where
   toJSON (DBRef k) = A.toJSON k
 
-instance A.FromJSON (GDBRef t a) where
-  parseJSON (A.Number n) = return $ DBRef (floor n)
-  parseJSON _ = error "Expected Number"
+instance A.FromJSON k => A.FromJSON (GDBRef t a k) where
+  parseJSON k = DBRef `fmap` A.parseJSON k
 
-instance (Model t) => Show (GDBRef rt t) where
+instance (Model t k, Show k) => Show (GDBRef rt t k) where
   showsPrec n (DBRef k) = showsPrec n k
-instance (Model t) => Read (GDBRef rt t) where
+instance (Model t k, Read k) => Read (GDBRef rt t k) where
   readsPrec n str = map wrap $ readsPrec n str
     where wrap (k, s) = (DBRef k, s)
-instance FromField (GDBRef rt t) where
+instance FromField k => FromField (GDBRef rt t k) where
   {-# INLINE fromField #-}
   fromField f bs = DBRef <$> fromField f bs
-instance ToField (GDBRef rt t) where
+instance ToField k => ToField (GDBRef rt t k) where
   {-# INLINE toField #-}
   toField (DBRef k) = toField k
 
@@ -252,7 +246,7 @@ type DBRefUnique = GDBRef UniqueRef
 
 -- | Create a reference to the primary key of a 'Model', suitable for
 -- storing in a 'DBRef' or 'DBRefUnique' field of a different 'Model'.
-mkDBRef :: (Model a) => a -> GDBRef rt a
+mkDBRef :: (Model a k) => a -> GDBRef rt a k
 mkDBRef a
   | (DBKey k) <- primaryKey a = DBRef k
   | otherwise = error $ "mkDBRef " ++ S8.unpack (modelName a) ++ ": NullKey"
@@ -264,7 +258,7 @@ mkDBRef a
 -- method of the 'Model' class.  Note the table and column names must
 -- all be unquoted in this data structure, as they will later be
 -- quoted using 'quoteIdent' by the 'modelIdentifiers' method.
-data ModelInfo a = ModelInfo {
+data ModelInfo a k = ModelInfo {
     modelTable :: !S.ByteString
     -- ^ The name of the database table corresponding to this model.
     -- The default 'modelInfo' instance uses 'defaultModelTable',
@@ -292,14 +286,14 @@ data ModelInfo a = ModelInfo {
     -- 'defaultModelGetPrimaryKey').  If you customize this field, you
     -- must also customize 'modelGetPrimaryKey'--no check is made that
     -- the two are consistent.
-  , modelGetPrimaryKey :: !(a -> DBKey)
+  , modelGetPrimaryKey :: !(a -> DBKey k)
     -- ^ Return the primary key of a particular model instance.  If
     -- you customize this field, you must also customize
     -- 'modelPrimaryColumn'--no check is made that the two are
     -- consistent.
   }
 
-instance Show (ModelInfo a) where
+instance Show (ModelInfo a k) where
   show a = intercalate " " [
       "Model", show $ modelTable a, show $ modelColumns a
     , show $ modelPrimaryColumn a , "?"]
@@ -351,25 +345,26 @@ defaultModelColumns = gColumns . from
 -- | This class extracts the first field in a data structure when the
 -- field is of type 'DBKey'.  If you get a compilation error because
 -- of this class, then move the 'DBKey' first in your data structure.
-class GPrimaryKey0 f where
-  gPrimaryKey0 :: f p -> DBKey
-instance (RequireSelector c) => GPrimaryKey0 (S1 c (K1 i DBKey)) where
+class GPrimaryKey0 f k where
+  gPrimaryKey0 :: f p -> DBKey k
+instance (RequireSelector c) => GPrimaryKey0 (S1 c (K1 i (DBKey k))) k where
   {-# INLINE gPrimaryKey0 #-}
   gPrimaryKey0 (M1 (K1 k)) = k
-instance (GPrimaryKey0 a) => GPrimaryKey0 (a :*: b) where
+instance (GPrimaryKey0 a k) => GPrimaryKey0 (a :*: b) k where
   {-# INLINE gPrimaryKey0 #-}
   gPrimaryKey0 (a :*: _) = gPrimaryKey0 a
-instance (GPrimaryKey0 f) => GPrimaryKey0 (C1 c f) where
+instance (GPrimaryKey0 f k) => GPrimaryKey0 (C1 c f) k where
   {-# INLINE gPrimaryKey0 #-}
   gPrimaryKey0 (M1 fp) = gPrimaryKey0 fp
-instance (GPrimaryKey0 f) => GPrimaryKey0 (D1 c f) where
+instance (GPrimaryKey0 f k) => GPrimaryKey0 (D1 c f) k where
   {-# INLINE gPrimaryKey0 #-}
   gPrimaryKey0 (M1 fp) = gPrimaryKey0 fp
 
 -- | Extract the primary key of type 'DBKey' from a model when the
 -- 'DBKey' is the first element of the data structure.  Fails to
 -- compile if the first field is not of type 'DBKey'.
-defaultModelGetPrimaryKey :: (Generic a, GPrimaryKey0 (Rep a)) => a -> DBKey
+defaultModelGetPrimaryKey :: (Generic a, GPrimaryKey0 (Rep a) k)
+                          => a -> DBKey k
 {-# INLINE defaultModelGetPrimaryKey #-}
 defaultModelGetPrimaryKey = gPrimaryKey0 . from
 
@@ -429,11 +424,11 @@ deleteAt _ _     = []
 -- /except/ the primary key, since the primary key should never be
 -- written to a database.  Every field must be an instance of
 -- 'ToField'.
-defaultModelWrite :: forall a. (Model a, Generic a, GToRow (Rep a))
+defaultModelWrite :: forall a k. (Model a k, Generic a, GToRow (Rep a))
                   => a -> [Action]
 {-# INLINE defaultModelWrite #-}
 defaultModelWrite a = deleteAt pki $ defaultToRow a
-  where pki = modelPrimaryColumn (modelInfo :: ModelInfo a)
+  where pki = modelPrimaryColumn (modelInfo :: ModelInfo a k)
 
 -- | The default definition of 'modelInfo'. See the documentation at
 -- 'Model' for more information.  Sets 'modelTable' to the name of the
@@ -450,9 +445,9 @@ defaultModelWrite a = deleteAt pki $ defaultToRow a
 -- of defaults.  The default for 'modelPrimaryColumn' is 0.  If you
 -- overwrite that, you will need to overwrite 'modelGetPrimaryKey' as
 -- well (and likely vice versa).
-defaultModelInfo :: forall a.
+defaultModelInfo :: forall a k.
                     (Generic a, GDatatypeName (Rep a), GColumns (Rep a)
-                    , GPrimaryKey0 (Rep a)) => ModelInfo a
+                    , GPrimaryKey0 (Rep a) k) => ModelInfo a k
 defaultModelInfo = m
   where m = ModelInfo { modelTable = defaultModelTable a
                       , modelColumns = defaultModelColumns a
@@ -480,9 +475,9 @@ defaultModelInfo = m
 -- would associate type @Bar@ with a database table called @bar@ with
 -- fields @id@, @name_of_bar@, and @parent@.
 underscoreModelInfo :: (Generic a, GToRow (Rep a), GFromRow (Rep a)
-                       , GPrimaryKey0 (Rep a), GColumns (Rep a)
+                       , GPrimaryKey0 (Rep a) k, GColumns (Rep a)
                        , GDatatypeName (Rep a)) =>
-                       S.ByteString -> ModelInfo a
+                       S.ByteString -> ModelInfo a k
 underscoreModelInfo prefix = def {
       modelTable = toUnderscore True $ modelTable def
     , modelColumns = map fixCol $ modelColumns def
@@ -553,7 +548,7 @@ data ModelIdentifiers a = ModelIdentifiers {
 
 -- | The default simply quotes the 'modelInfo' and 'modelColumns'
 -- fields of 'ModelInfo' using 'quoteIdent'.
-defaultModelIdentifiers :: ModelInfo a -> ModelIdentifiers a
+defaultModelIdentifiers :: ModelInfo a k -> ModelIdentifiers a
 defaultModelIdentifiers mi = ModelIdentifiers {
     modelQTable = qtable
   , modelQColumns = qcols
@@ -714,7 +709,7 @@ emptyModelCreateInfo = ModelCreateInfo {
 -- Alternatively, you can directly call the lower-level functions from
 -- which 'defaultModelInfo' is built ('defaultModelTable',
 -- 'defaultModelColumns', 'defaultModelGetPrimaryKey').
-class Model a where
+class Model a k | a -> k where
   -- | @modelInfo@ provides information about how the Haskell data
   -- type is stored in the database, in the form of a 'ModelInfo' data
   -- structure.  Among other things, this structure specifies the name
@@ -722,9 +717,9 @@ class Model a where
   -- corresponding to the Haskell data structure fields, and the
   -- position of the primary key in both the database columns and the
   -- Haskell data structure.
-  modelInfo :: ModelInfo a
+  modelInfo :: ModelInfo a k
   default modelInfo :: (Generic a, GDatatypeName (Rep a), GColumns (Rep a)
-                       , GPrimaryKey0 (Rep a)) => ModelInfo a
+                       , GPrimaryKey0 (Rep a) k) => ModelInfo a k
   {-# INLINE modelInfo #-}
   modelInfo = defaultModelInfo
 
@@ -806,7 +801,7 @@ class Model a where
 degen_err :: a
 degen_err = error "Attempt to use degenerate ToRow instance as Model"
 #define DEGENERATE(ctx,t)             \
-instance ctx => Model t where {       \
+instance ctx => Model t () where {       \
   modelInfo = degen_err;              \
   modelIdentifiers = degen_err;       \
   modelRead = fromRow;                \
@@ -833,9 +828,9 @@ DEGENERATE((FromField a, FromField b, FromField c, FromField d, FromField e), \
 --        "USING a.id = b.a_id" :: (A :. Maybe B)
 -- @
 --
-instance forall a. Model a => Model (Maybe a) where
+instance forall a k. Model a k => Model (Maybe a) k where
   modelInfo = mi_a { modelGetPrimaryKey = getPrimaryKey }
-    where mi_a = modelInfo :: ModelInfo a
+    where mi_a = modelInfo :: ModelInfo a k
           getPrimaryKey Nothing  = NullKey
           getPrimaryKey (Just a) = modelGetPrimaryKey mi_a a
 
@@ -855,7 +850,7 @@ instance forall a. Model a => Model (Maybe a) where
   modelRead =
     Just `fmap` (modelRead :: RowParser a)
     <|> do
-      let n = length $ modelColumns (modelInfo :: ModelInfo a)
+      let n = length $ modelColumns (modelInfo :: ModelInfo a k)
       replicateM_ n (field :: RowParser AnyField)
       return Nothing
 
@@ -865,7 +860,7 @@ data AnyField = AnyField
 instance FromField AnyField where
   fromField _ _ = pure AnyField
 
-joinModelIdentifiers :: forall a b. (Model a, Model b)
+joinModelIdentifiers :: forall a k1 b k2. (Model a k1, Model b k2)
                      => ModelIdentifiers (a :. b)
 joinModelIdentifiers = r
   where r = ModelIdentifiers {
@@ -888,7 +883,7 @@ joinModelIdentifiers = r
 -- ':.' instance does not allow normal model operations such as
 -- 'findRow', 'save', and 'destroy'.  Attempts to use such functions
 -- will result in an exception.
-instance (Model a, Model b) => Model (a :. b) where
+instance (Model a k1, Model b k2) => Model (a :. b) (k1, k2) where
   modelInfo = error "attempt to access ModelInfo of join type :."
   modelIdentifiers = joinModelIdentifiers
   modelRead = (:.) <$> modelRead <*> modelRead
@@ -984,17 +979,17 @@ toAs :: alias -> row -> As alias row
 {-# INLINE toAs #-}
 toAs _ = As
 
-aliasModelInfo :: forall a alias.
-                  (Model a, RowAlias alias) =>
-                  ModelInfo a -> ModelInfo (As alias a)
+aliasModelInfo :: forall a k alias.
+                  (Model a k, RowAlias alias) =>
+                  ModelInfo a k -> ModelInfo (As alias a) k
 aliasModelInfo mi = r
   where alias = rowAliasName (undefined :: As alias a)
         r = mi { modelTable = alias
                , modelGetPrimaryKey = modelGetPrimaryKey mi . unAs
                }
 
-aliasModelIdentifiers :: forall a alias. (Model a, RowAlias alias)
-                      => ModelInfo a -> ModelIdentifiers (As alias a)
+aliasModelIdentifiers :: forall a k alias. (Model a k, RowAlias alias)
+                      => ModelInfo a k -> ModelIdentifiers (As alias a)
 aliasModelIdentifiers mi
   | not ok    = error $ "aliasModelIdentifiers: degenerate model " ++
                 show (modelQTable ida )
@@ -1020,7 +1015,7 @@ aliasModelIdentifiers mi
 -- @AS@ keyword.  This is primarily useful when joining a model with
 -- itself.  Hence, standard operations ('findRow', 'save', 'destroy')
 -- are not allowed on 'As' models.
-instance (Model a, RowAlias as) => Model (As as a) where
+instance (Model a k, RowAlias as) => Model (As as a) k where
   {-# INLINE modelInfo #-}
   modelInfo = aliasModelInfo modelInfo
   {-# INLINE modelRead #-}
@@ -1033,12 +1028,12 @@ instance (Model a, RowAlias as) => Model (As as a) where
 
 -- | Lookup the 'modelTable' of a 'Model' (@modelName _ = 'modelTable'
 -- ('modelInfo' :: 'ModelInfo' a)@).
-modelName :: forall a. (Model a) => a -> S.ByteString
+modelName :: forall a k. (Model a k) => a -> S.ByteString
 {-# INLINE modelName #-}
-modelName _ = modelTable (modelInfo :: ModelInfo a)
+modelName _ = modelTable (modelInfo :: ModelInfo a k)
 
 -- | Lookup the primary key of a 'Model'.
-primaryKey :: (Model a) => a -> DBKey
+primaryKey :: (Model a k) => a -> DBKey k
 {-# INLINE primaryKey #-}
 primaryKey a = modelGetPrimaryKey modelInfo a
 
@@ -1052,20 +1047,20 @@ modelSelectFragment mi = S.concat [
 -- | A newtype wrapper in the 'FromRow' class, permitting every model
 -- to be used as the result of a database query.
 newtype LookupRow a = LookupRow { lookupRow :: a } deriving (Show)
-instance (Model a) => FromRow (LookupRow a) where
+instance (Model a k) => FromRow (LookupRow a) where
   fromRow = LookupRow <$> modelRead
 
 -- | A newtype wrapper in the 'ToRow' class, which marshalls every
 -- field except the primary key.  For use with 'modelInsertQuery'.
 newtype InsertRow a = InsertRow a deriving (Show)
-instance (Model a) => ToRow (InsertRow a) where
+instance (Model a k) => ToRow (InsertRow a) where
   toRow (InsertRow a) = modelWrite a
 
 -- | A newtype wrapper in the 'ToRow' class, which marshalls every
 -- field except the primary key, followed by the primary key.  For use
 -- with 'modelUpdateQuery'.
 newtype UpdateRow a = UpdateRow a deriving (Show)
-instance (Model a) => ToRow (UpdateRow a) where
+instance (ToField k, Model a k) => ToRow (UpdateRow a) where
   toRow (UpdateRow a) = toRow $ InsertRow a :. Only (primaryKey a)
 
 -- | Dump an entire model.  Useful for development and debugging only,
@@ -1073,7 +1068,7 @@ instance (Model a) => ToRow (UpdateRow a) where
 --
 -- Note that unlike the other primary model operations, it is OK to
 -- call 'findAll' even on degenerate models such as 'As' and ':.'.
-findAll :: forall r. (Model r) => Connection -> IO [r]
+findAll :: forall r k. (Model r k) => Connection -> IO [r]
 findAll c = action
   where mi = modelIdentifiers :: ModelIdentifiers r
         q = Query $ modelSelectFragment mi
@@ -1081,7 +1076,8 @@ findAll c = action
 
 -- | Follow a 'DBRef' or 'DBRefUnique' and fetch the target row from
 -- the database into a 'Model' type @r@.
-findRow :: forall r rt. (Model r) => Connection -> GDBRef rt r -> IO (Maybe r)
+findRow :: forall r k rt. (ToField k, Model r k)
+        => Connection -> GDBRef rt r k -> IO (Maybe r)
 findRow c k = action
   where qs = modelQueries :: ModelQueries r
         action = do rs <- query c (modelLookupQuery qs) (Only k)
@@ -1090,7 +1086,7 @@ findRow c k = action
 
 -- | Like 'trySave' but instead of returning an 'Either', throws a
 -- 'ValidationError' if the 'Model' is invalid.
-save :: (Model r)
+save :: (ToField k, Model r k)
      => Connection -> r -> IO r
 save c r = do
   eResp <- trySave c r
@@ -1099,7 +1095,7 @@ save c r = do
     Left  errs -> throwIO errs
 
 -- | 'save' but returning '()' instead of the saved model.
-save_ :: (Model r)
+save_ :: (ToField k, Model r k)
       => Connection -> r -> IO ()
 save_ c r = void $ save c r
 
@@ -1111,7 +1107,7 @@ save_ c r = void $ save c r
 --
 -- If the 'Model' is invalid (i.e. the return value of 'modelValid' is
 -- non-empty), a list of 'InvalidError' is returned instead.
-trySave :: forall r. Model r
+trySave :: forall r k. (ToField k, Model r k)
         => Connection -> r -> IO (Either ValidationError r)
 trySave c r | not . H.null $ validationErrors errors = return $ Left errors
             | NullKey <- primaryKey r = do
@@ -1130,7 +1126,7 @@ trySave c r | not . H.null $ validationErrors errors = return $ Left errors
 -- the database.  This function only looks at the primary key in the
 -- data structure.  It is an error to call this function if the
 -- primary key is not set.
-destroy :: forall a. (Model a) => Connection -> a -> IO ()
+destroy :: forall a k. (ToField k, Model a k) => Connection -> a -> IO ()
 destroy c a =
   case primaryKey a of
     NullKey -> fail "destroy: NullKey"
@@ -1138,7 +1134,8 @@ destroy c a =
                (modelDeleteQuery (modelQueries :: ModelQueries a)) (Only k)
 
 -- | Remove a row from the database without fetching it first.
-destroyByRef :: forall a rt. (Model a) => Connection -> GDBRef rt a -> IO ()
+destroyByRef :: forall a k rt. (ToField k, Model a k)
+             => Connection -> GDBRef rt a k -> IO ()
 destroyByRef c a =
   void $ execute c (modelDeleteQuery (modelQueries :: ModelQueries a)) (Only a)
 

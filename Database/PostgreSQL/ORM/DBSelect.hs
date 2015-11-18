@@ -180,7 +180,7 @@ emptyDBSelect = (to gdbsDefault) { selSelectKeyword = fromString "SELECT" }
 --
 -- On the other hand, for such a simple expression, you might as well
 -- call 'query_' directly.
-expressionDBSelect :: (Model r) => Query -> DBSelect r
+expressionDBSelect :: (Model r k) => Query -> DBSelect r
 expressionDBSelect q = emptyDBSelect { selFields = q }
 
 -- | Create a 'Builder' for a rendered version of a 'DBSelect'.  This
@@ -262,14 +262,14 @@ setOffset i dbs = dbs { selOffset = fmtSql "OFFSET ?" (Only i) }
 -- >        "rank() OVER (ORDER BY value), value::float4/SUM(value) OVER ()"
 -- >        modelDBSelect
 -- >          :: IO [Bar :. (Int, Double)]
-addExpression :: (Model r) => Query -> DBSelect a -> DBSelect (a :. r)
+addExpression :: (Model r k) => Query -> DBSelect a -> DBSelect (a :. r)
 addExpression q dbs = dbs {
   selFields = if qNull $ selFields dbs then q
               else Query $ S.concat $ map fromQuery [selFields dbs, ", ", q]
   }
 
 -- | A 'DBSelect' that returns all rows of a model.
-modelDBSelect :: forall a. (Model a) => DBSelect a
+modelDBSelect :: forall a k. (Model a k) => DBSelect a
 modelDBSelect = r
   where mi = modelIdentifiers :: ModelIdentifiers a
         r = emptyDBSelect {
@@ -284,14 +284,14 @@ modelDBSelect = r
 -- and the parameters supplied later.  Hence, you should use this
 -- version when the 'DBSelect' is static.  For dynamically modified
 -- 'DBSelect' structures, you may prefer 'dbSelect'.
-dbSelectParams :: (Model a, ToRow p) => DBSelect a -> Connection -> p -> IO [a]
+dbSelectParams :: (Model a k, ToRow p) => DBSelect a -> Connection -> p -> IO [a]
 {-# INLINE dbSelectParams #-}
 dbSelectParams dbs = \c p -> map lookupRow <$> query c q p
   where -- {-# NOINLINE q #-} (crashes under GHC 7.8)
         q = renderDBSelect dbs
 
 -- | Run a 'DBSelect' query and return the resulting models.
-dbSelect :: (Model a) => Connection -> DBSelect a -> IO [a]
+dbSelect :: (Model a k) => Connection -> DBSelect a -> IO [a]
 {-# INLINE dbSelect #-}
 dbSelect c dbs = map lookupRow <$> query_ c q
   where -- {-# NOINLINE q #-} (crashes under GHC 7.8)
@@ -304,7 +304,7 @@ data Cursor a = Cursor { curConn :: !Connection
                        , curCache :: IORef [a] }
 
 -- | Create a 'Cursor' for the given 'DBSelect'
-curSelect :: Model a => Connection -> DBSelect a -> IO (Cursor a)
+curSelect :: Model a k => Connection -> DBSelect a -> IO (Cursor a)
 curSelect c dbs = do
   name <- newTempName c
   execute_ c $
@@ -317,7 +317,7 @@ curSelect c dbs = do
 -- prefetched values, dbNext will return the head of the cache without querying
 -- the database. Otherwise, it will prefetch the next 256 values, return the
 -- first, and store the rest in the cache.
-curNext :: Model a => Cursor a -> IO (Maybe a)
+curNext :: Model a k => Cursor a -> IO (Maybe a)
 curNext Cursor{..} = do
   cache <- readIORef curCache
   case cache of
@@ -335,7 +335,7 @@ curNext Cursor{..} = do
 
 -- | Streams results of a 'DBSelect' and consumes them using a left-fold. Uses
 -- default settings for 'Cursor' (batch size is 256 rows).
-dbFold :: Model model
+dbFold :: Model model k
        => Connection -> (b -> model -> b) -> b -> DBSelect model -> IO b
 dbFold c act initial dbs = do
   cur <- curSelect c dbs
@@ -348,7 +348,7 @@ dbFold c act initial dbs = do
 
 -- | Streams results of a 'DBSelect' and consumes them using a monadic
 -- left-fold. Uses default settings for 'Cursor' (batch size is 256 rows).
-dbFoldM :: (MonadIO m, Model model)
+dbFoldM :: (MonadIO m, Model model k)
         => Connection -> (b -> model -> m b) -> b -> DBSelect model -> m b
 dbFoldM c act initial dbs = do
   cur <- liftIO $ curSelect c dbs
@@ -361,18 +361,19 @@ dbFoldM c act initial dbs = do
 
 -- | Streams results of a 'DBSelect' and consumes them using a monadic
 -- left-fold. Uses default settings for 'Cursor' (batch size is 256 rows).
-dbFoldM_ :: (MonadIO m, Model model)
+dbFoldM_ :: (MonadIO m, Model model k)
          => Connection -> (model -> m ()) -> DBSelect model -> m ()
 dbFoldM_ c act dbs = dbFoldM c (const act) () dbs
 
 -- | Group the returned tuples by unique a's. Expects the query to return a's
 -- in sequence -- all rows with the same value for a must be grouped together,
 -- for example, by sorting the result on a's primary key column.
-dbCollect :: (Model a, Model b)
+dbCollect :: (Eq k1, Model a k1, Model b k2)
            => Connection -> DBSelect (a :. b) -> IO [(a, [b])]
 dbCollect c ab = dbFold c group [] ab
   where
-    group :: (Model a, Model b) => [(a, [b])] -> (a :. b) -> [(a, [b])]
+    group :: (Eq k1, Model a k1, Model b k2)
+          => [(a, [b])] -> (a :. b) -> [(a, [b])]
     group    []     (a :. b) = [(a, [b])]
     group ls@(l:_)  (a :. b) | primaryKey a /= primaryKey (fst l) = (a, [b]):ls
     group    (l:ls) (_ :. b) = (fst l, b:(snd l)):ls
@@ -382,8 +383,8 @@ dbCollect c ab = dbFold c group [] ab
 -- from the second 'DBSelect', meaning fields such as 'selWith',
 -- 'selGroupBy', and 'selOrderBy' in the in the first 'DBSelect' are
 -- entirely ignored.
-dbJoin :: forall a b.
-          (Model a, Model b) =>
+dbJoin :: forall a k1 b k2.
+          (Model a k1, Model b k2) =>
           DBSelect a      -- ^ First table
           -> Query        -- ^ Join keyword (@\"JOIN\"@, @\"LEFT JOIN\"@, etc.)
           -> DBSelect b   -- ^ Second table
@@ -402,7 +403,7 @@ dbJoin left joinOp right onClause = addWhere_ (selWhere left) right {
 
 -- | A version of 'dbJoin' that uses 'modelDBSelect' for the joined
 -- tables.
-dbJoinModels :: (Model a, Model b) =>
+dbJoinModels :: (Model a k1, Model b k2) =>
                 Query           -- ^ Join keyword
                 -> Query        -- ^ @ON@ or @USING@ predicate
                 -> DBSelect (a :. b)
@@ -413,8 +414,8 @@ dbJoinModels kw on = dbJoin modelDBSelect kw modelDBSelect on
 -- of @something_containing_a@, but no static check is performed that
 -- this is the case.  If you @dbProject@ a type that doesn't make
 -- sense, you will get a runtime error from a failed database query.
-dbProject :: forall a something_containing_a.
-             (Model a) => DBSelect something_containing_a -> DBSelect a
+dbProject :: forall a k something_containing_a.
+             (Model a k) => DBSelect something_containing_a -> DBSelect a
 {-# INLINE dbProject #-}
 dbProject dbs = r
   where sela = modelDBSelect :: DBSelect a
@@ -429,8 +430,8 @@ dbProject dbs = r
 -- into the subquery (whereas otherwise they could get dropped by join
 -- operations).  Generally you will still want to use 'dbProject', but
 -- @dbProject'@ is available when needed.
-dbProject' :: forall a something_containing_a.
-              (Model a) => DBSelect something_containing_a -> DBSelect a
+dbProject' :: forall a k something_containing_a.
+              (Model a k) => DBSelect something_containing_a -> DBSelect a
 dbProject' dbs = r
   where sela = modelDBSelect :: DBSelect a
         ida = modelIdentifiers :: ModelIdentifiers a
@@ -455,7 +456,7 @@ mergeFromClauses canon left right =
 -- | Nest two type-compatible @JOIN@ queries.  As with 'dbJoin',
 -- fields of the first @JOIN@ (the @'DBSelect' (a :. b)@) other than
 -- 'selFields', 'selFrom', and 'selWhere' are entirely ignored.
-dbNest :: forall a b c. (Model a, Model b) =>
+dbNest :: forall a k1 b k2 c. (Model a k1, Model b k2) =>
           DBSelect (a :. b) -> DBSelect (b :. c) -> DBSelect (a :. b :. c)
 dbNest left right = addWhere_ (selWhere left) right {
     selFields = fields
@@ -468,6 +469,6 @@ dbNest left right = addWhere_ (selWhere left) right {
                  acols
 
 -- | Like 'dbNest', but projects away the middle type @b@.
-dbChain :: (Model a, Model b, Model c) =>
+dbChain :: (Model a k1, Model b k2, Model c k3) =>
            DBSelect (a :. b) -> DBSelect (b :. c) -> DBSelect (a :. c)
 dbChain left right = dbProject $ dbNest left right

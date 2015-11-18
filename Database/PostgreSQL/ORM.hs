@@ -13,7 +13,7 @@ module Database.PostgreSQL.ORM (
   -- * Associations between models
   , Association, assocSelect, assocProject, assocWhere, findAssoc
   -- ** Parent-child associations
-  , GDBRefInfo(..), DBRefInfo, defaultDBRefInfo, dbrefAssocs, has, belongsTo
+  , GDBRefInfo(..), DBRefInfo, dbrefAssocs--, has, belongsTo, defaultDBRefInfo
   -- ** Join table associations
   , JoinTable(..), defaultJoinTable, jtAssocs, jtAdd, jtRemove, jtRemoveByRef
   -- ** Chaining associations
