@@ -1,7 +1,7 @@
 
 module Database.PostgreSQL.ORM (
   -- * The Model class and related types
-    Model(modelInfo, modelValid), ModelInfo(..)
+    Model(modelInfo, modelValid, PrimaryKey), ModelInfo(..)
   , defaultModelInfo, underscoreModelInfo
   , DBKey(..), DBRef, DBRefUnique, mkDBRef, primaryKey
   , (:.), As(..), RowAlias(..), fromAs
