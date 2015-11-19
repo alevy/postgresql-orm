@@ -77,7 +77,7 @@
 -- 'defaultModelColumns', 'defaultModelGetPrimaryKey').
 module Database.PostgreSQL.ORM.Model (
       -- * The Model class
-      Model(..), ModelInfo(..), ModelIdentifiers(..), ModelQueries(..)
+      Model(..), PrimaryKey, ModelInfo(..), ModelIdentifiers(..), ModelQueries(..)
     , underscoreModelInfo
       -- * Data types for holding primary keys
     , DBKeyType, DBKey(..), isNullKey
