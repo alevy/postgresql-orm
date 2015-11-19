@@ -86,7 +86,9 @@ modelCreate :: (Model a, Generic a, GDefTypes (Rep a)) =>
 modelCreate c a = execute_ c (modelCreateStatement a)
 
 -- | Create the database table corresponding to a 'JoinTable'.
-jtCreateStatement :: (Model a, Model b) => JoinTable a b -> Query
+jtCreateStatement :: ( Model a, SqlType (PrimaryKey a)
+                     , Model b, SqlType (PrimaryKey b))
+                  => JoinTable a b -> Query
 jtCreateStatement jt = Query $ S.concat [
     "CREATE TABLE ", quoteIdent $ jtTable jt, " ("
     , S.intercalate ", " $ sort [typa, typb]
@@ -100,5 +102,6 @@ jtCreateStatement jt = Query $ S.concat [
         typb = idb <> " " <> sqlBaseType refb <> " ON DELETE CASCADE NOT NULL"
 
 -- | Create a join table in the database.
-jtCreate :: (Model a, Model b) => Connection -> JoinTable a b -> IO Int64
+jtCreate :: (Model a, SqlType (PrimaryKey a), Model b, SqlType (PrimaryKey b))
+         => Connection -> JoinTable a b -> IO Int64
 jtCreate c jt = execute_ c (jtCreateStatement jt)

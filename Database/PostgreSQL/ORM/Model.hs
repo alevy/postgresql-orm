@@ -1,14 +1,15 @@
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DefaultSignatures #-}
+{-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE CPP #-}
 
 -- | The main database ORM interface. This module contains
@@ -76,7 +77,7 @@
 -- 'defaultModelColumns', 'defaultModelGetPrimaryKey').
 module Database.PostgreSQL.ORM.Model (
       -- * The Model class
-      Model(..), PrimaryKey, ModelInfo(..), ModelIdentifiers(..), ModelQueries(..)
+      Model(..), ModelInfo(..), ModelIdentifiers(..), ModelQueries(..)
     , underscoreModelInfo
       -- * Data types for holding primary keys
     , DBKeyType, DBKey(..), isNullKey
@@ -199,25 +200,56 @@ isNullKey _       = False
 -- @GDBRef@, where @GDBRef@'s first type argument, @reftype@, is a
 -- phantom type denoting the flavor of reference ('NormalRef' or
 -- 'UniqueRef').
-newtype GDBRef reftype table = DBRef DBKeyType
-  deriving (Eq, Data, Typeable, Num, Integral, Real, Ord, Enum, Bounded, Generic)
+data GDBRef reftype table = Model table => DBRef (PrimaryKey table)
+  --deriving (Eq, Data, Typeable, Num, Integral, Real, Ord, Enum, Bounded, Generic)
 
-instance A.ToJSON (GDBRef t a) where
+deriving instance Eq (PrimaryKey table) => Eq (GDBRef reftype table)
+deriving instance Ord (PrimaryKey table) => Ord (GDBRef reftype table)
+
+instance (Model table, IsString (PrimaryKey table))
+    => IsString (GDBRef reftype table) where
+  fromString = DBRef . fromString
+
+instance (Num (PrimaryKey table), Model table) => Num (GDBRef reftype table) where
+  (DBRef k1) + (DBRef k2) = DBRef (k1 + k2)
+  (DBRef k1) - (DBRef k2) = DBRef (k1 - k2)
+  (DBRef k1) * (DBRef k2) = DBRef (k1 * k2)
+  abs (DBRef k) = DBRef $ abs k
+  signum (DBRef k) = DBRef $ signum k
+  fromInteger = DBRef . fromInteger
+  negate (DBRef k) = DBRef $ negate k
+
+instance (Model table, Enum (PrimaryKey table))
+    => Enum (GDBRef reftype table) where
+  toEnum = DBRef . toEnum
+  fromEnum (DBRef k) = fromEnum k
+
+instance (Model table, Real (PrimaryKey table))
+    => Real (GDBRef reftype table) where
+  toRational (DBRef k) = toRational k
+
+instance (Model table, Integral (PrimaryKey table))
+    => Integral (GDBRef reftype table) where
+  quotRem (DBRef k1) (DBRef k2) =
+    let (d1, d2) = (quotRem k1 k2) in (DBRef d1, DBRef d2)
+  toInteger (DBRef k) = toInteger k
+
+instance A.ToJSON (PrimaryKey a) => A.ToJSON (GDBRef t a) where
   toJSON (DBRef k) = A.toJSON k
 
-instance A.FromJSON (GDBRef t a) where
-  parseJSON (A.Number n) = return $ DBRef (floor n)
-  parseJSON _ = error "Expected Number"
+instance (Model a, A.FromJSON (PrimaryKey a)) => A.FromJSON (GDBRef t a) where
+  parseJSON k = DBRef <$> A.parseJSON k
 
-instance (Model t) => Show (GDBRef rt t) where
+instance Show (PrimaryKey t) => Show (GDBRef rt t) where
   showsPrec n (DBRef k) = showsPrec n k
-instance (Model t) => Read (GDBRef rt t) where
+instance (Model t, Read (PrimaryKey t)) => Read (GDBRef rt t) where
   readsPrec n str = map wrap $ readsPrec n str
     where wrap (k, s) = (DBRef k, s)
-instance FromField (GDBRef rt t) where
+
+instance Model t => FromField (GDBRef rt t) where
   {-# INLINE fromField #-}
   fromField f bs = DBRef <$> fromField f bs
-instance ToField (GDBRef rt t) where
+instance Model t => ToField (GDBRef rt t) where
   {-# INLINE toField #-}
   toField (DBRef k) = toField k
 
@@ -254,11 +286,8 @@ type DBRefUnique = GDBRef UniqueRef
 
 -- | Create a reference to the primary key of a 'Model', suitable for
 -- storing in a 'DBRef' or 'DBRefUnique' field of a different 'Model'.
-mkDBRef :: (Model a, PrimaryKey a ~ DBKey) => a -> GDBRef rt a
-mkDBRef a
-  | (DBKey k) <- primaryKey a = DBRef k
-  | otherwise = error $ "mkDBRef " ++ S8.unpack (modelName a) ++ ": NullKey"
-
+mkDBRef :: (Model a) => a -> GDBRef rt a
+mkDBRef a = DBRef $ primaryKey a
 
 -- | A @ModelInfo T@ contains the information necessary for mapping
 -- @T@ to a database table.  Each @'Model'@ type has a single
@@ -913,7 +942,7 @@ instance GUnitType V1 where
 instance (Datatype c, GUnitType f) => GUnitType (D1 c f) where
   gUnitTypeName = datatypeName
 
--- | The class of types that can be used as tags in as 'As' alias.
+-- | The class of types that can be used as tags in an 'As' alias.
 -- Such types should be unit types--in other words, have exactly one
 -- constructor where the constructor is nullary (take no arguments).
 -- The reason for this class is that the 'Model' instance for 'As'
@@ -931,11 +960,11 @@ class RowAlias a where
   -- > data My_alias = My_alias
   -- > instance RowAlias My_alias where rowAliasName _ = "my_alias"
   --
-  -- Keep in mind that PostgreSQL folds unquoted identifiers to
-  -- lower-case.  However, this library quotes row aliases in @SELECT@
-  -- statements, thereby preserving case.  Hence, if you want to call
-  -- construct a @WHERE@ clause without double-quoting row aliases in
-  -- your 'Query', you should avoid capital letters in alias names.
+  -- Keep in mind that PostgreSQL folds unquoted identifiers to lower-case.
+  -- However, this library quotes row aliases in @SELECT@ statements, thereby
+  -- preserving case.  Hence, if you want to construct a @WHERE@ clause without
+  -- double-quoting row aliases in your 'Query', you should avoid capital
+  -- letters in alias names.
   --
   -- A default implementation of @rowAliasName@ exists for unit types
   -- (as well as empty data declarations) in the 'Generic' class.  The

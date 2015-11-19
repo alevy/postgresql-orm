@@ -1,4 +1,5 @@
 {-# LANGUAGE CPP #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -91,7 +92,7 @@ instance (SqlType a) => SqlType (Maybe a) where
 instance (Typeable a, SqlType a) => SqlType (V.Vector a) where
   sqlBaseType _ = sqlBaseType (undefined :: a) <> "[]"
 
-instance (Model a) => SqlType (DBRef a) where
+instance (Model a, SqlType (PrimaryKey a)) => SqlType (DBRef a) where
   sqlBaseType (DBRef k) = sqlBaseType k <> ref
     where t = modelInfo :: ModelInfo a
           Just orig = modelOrigTable (modelIdentifiers :: ModelIdentifiers a)
@@ -99,7 +100,7 @@ instance (Model a) => SqlType (DBRef a) where
               " REFERENCES ", quoteIdent orig, "("
               , quoteIdent (modelColumns t !! modelPrimaryColumn t), ")" ]
 
-instance (Model a) => SqlType (DBRefUnique a) where
+instance (Model a, SqlType (PrimaryKey a)) => SqlType (DBRefUnique a) where
   sqlBaseType (DBRef k) = sqlBaseType k <> ref
     where t = modelInfo :: ModelInfo a
           Just orig = modelOrigTable (modelIdentifiers :: ModelIdentifiers a)

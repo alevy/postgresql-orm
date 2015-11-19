@@ -254,12 +254,12 @@ type DBRefInfo = GDBRefInfo NormalRef
 data ExtractRef a = ExtractRef deriving (Show)
 instance Extractor ExtractRef (GDBRef rt a) (DBRef a) THasOne where
   extract _ (DBRef k) = THasOne $ DBRef k
-instance Extractor ExtractRef (GDBRef rt a) (DBRef (As alias a)) THasOne where
+instance RowAlias alias => Extractor ExtractRef (GDBRef rt a) (DBRef (As alias a)) THasOne where
   extract _ (DBRef k) = THasOne $ DBRef k
 instance Extractor ExtractRef (Maybe (GDBRef rt a)) (DBRef a) THasOne where
   extract _ (Just (DBRef k)) = THasOne $ DBRef k
   extract _ _                = error "Maybe DBRef is Nothing"
-instance Extractor ExtractRef (Maybe (GDBRef rt a)) (DBRef (As alias a))
+instance RowAlias alias => Extractor ExtractRef (Maybe (GDBRef rt a)) (DBRef (As alias a))
          THasOne where
   extract _ (Just (DBRef k)) = THasOne $ DBRef k
   extract _ _                = error "Maybe DBRef is Nothing"
