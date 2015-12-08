@@ -28,14 +28,18 @@ instance FromJSON ValidationError where
 
 type ValidationFunc a = a -> ValidationError
 
+validationError :: T.Text -> T.Text -> ValidationError
+validationError columnName description =
+    ValidationError $ H.singleton columnName [description]
+
 validate :: (a -> Bool)
          -> T.Text -- ^ Column name
          -> T.Text -- ^ Error description
          -> ValidationFunc a
 validate validator columnName desc = \a ->
-  if validator a then
-    ValidationError H.empty
-    else ValidationError $ H.singleton columnName [desc]
+  if validator a
+    then mempty
+    else validationError columnName desc
 
 validateNotEmpty :: (a -> T.Text)
                  -> T.Text
