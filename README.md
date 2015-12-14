@@ -9,6 +9,8 @@ join operations on associations between `Model` instances.
 
 ## Declaration
 
+[![Join the chat at https://gitter.im/alevy/postgresql-orm](https://badges.gitter.im/Join%20Chat.svg)](https://gitter.im/alevy/postgresql-orm?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
+
 Creating a `Model` in Haskell is easy. We simply declare a datatype using record
 syntax, include a field of type `DBKey` to hold the primary key and let Haskell
 Generics do the rest:
