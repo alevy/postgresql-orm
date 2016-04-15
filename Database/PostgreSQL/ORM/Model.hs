@@ -603,6 +603,7 @@ defaultModelUpdateQuery mi = Query $ S.concat [
     "UPDATE ", modelQTable mi, " SET "
     , S.intercalate ", " $ map (<> " = ?") $ modelQWriteColumns mi
     , " WHERE ", modelQPrimaryColumn mi, " = ?"
+    , " RETURNING ", S.intercalate ", " (modelQColumns mi)
   ]
 
 -- | Default SQL insert query for a model.
@@ -1119,10 +1120,11 @@ trySave c r | not . H.null $ validationErrors errors = return $ Left errors
                   case rs of [r'] -> return $ Right $ lookupRow r'
                              _    -> fail "save: database did not return row"
             | otherwise = do
-                  n <- execute c (modelUpdateQuery qs) (UpdateRow r)
-                  case n of 1 -> return $ Right r
-                            _ -> fail $ "save: database updated " ++ show n
-                                        ++ " records"
+                  rows <- query c (modelUpdateQuery qs) (UpdateRow r)
+                  case rows of [r'] -> return $ Right $ lookupRow r'
+                               _     -> fail $ "save: database updated "
+                                          ++ show (length rows)
+                                          ++ " records"
   where qs = modelQueries :: ModelQueries r
         errors = modelValid r
 
