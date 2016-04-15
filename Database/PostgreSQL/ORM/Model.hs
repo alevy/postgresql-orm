@@ -603,6 +603,7 @@ defaultModelUpdateQuery mi = Query $ S.concat [
     "UPDATE ", modelQTable mi, " SET "
     , S.intercalate ", " $ map (<> " = ?") $ modelQWriteColumns mi
     , " WHERE ", modelQPrimaryColumn mi, " = ?"
+    , " RETURNING ", S.intercalate ", " (modelQColumns mi)
   ]
 
 -- | Default SQL insert query for a model.
@@ -1090,7 +1091,7 @@ findRow c k = action
 
 -- | Like 'trySave' but instead of returning an 'Either', throws a
 -- 'ValidationError' if the 'Model' is invalid.
-save :: (Model r)
+save :: (Model r, FromRow r)
      => Connection -> r -> IO r
 save c r = do
   eResp <- trySave c r
@@ -1099,7 +1100,7 @@ save c r = do
     Left  errs -> throwIO errs
 
 -- | 'save' but returning '()' instead of the saved model.
-save_ :: (Model r)
+save_ :: (Model r, FromRow r)
       => Connection -> r -> IO ()
 save_ c r = void $ save c r
 
@@ -1111,7 +1112,7 @@ save_ c r = void $ save c r
 --
 -- If the 'Model' is invalid (i.e. the return value of 'modelValid' is
 -- non-empty), a list of 'InvalidError' is returned instead.
-trySave :: forall r. Model r
+trySave :: forall r. (Model r, FromRow r)
         => Connection -> r -> IO (Either ValidationError r)
 trySave c r | not . H.null $ validationErrors errors = return $ Left errors
             | NullKey <- primaryKey r = do
@@ -1119,10 +1120,11 @@ trySave c r | not . H.null $ validationErrors errors = return $ Left errors
                   case rs of [r'] -> return $ Right $ lookupRow r'
                              _    -> fail "save: database did not return row"
             | otherwise = do
-                  n <- execute c (modelUpdateQuery qs) (UpdateRow r)
-                  case n of 1 -> return $ Right r
-                            _ -> fail $ "save: database updated " ++ show n
-                                        ++ " records"
+                  rows <- query c (modelUpdateQuery qs) (UpdateRow r)
+                  case rows of [ret] -> return $ Right ret
+                               _     -> fail $ "save: database updated "
+                                          ++ show (length rows)
+                                          ++ " records"
   where qs = modelQueries :: ModelQueries r
         errors = modelValid r
 
