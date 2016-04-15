@@ -1091,7 +1091,7 @@ findRow c k = action
 
 -- | Like 'trySave' but instead of returning an 'Either', throws a
 -- 'ValidationError' if the 'Model' is invalid.
-save :: (Model r, FromRow r)
+save :: (Model r)
      => Connection -> r -> IO r
 save c r = do
   eResp <- trySave c r
@@ -1100,7 +1100,7 @@ save c r = do
     Left  errs -> throwIO errs
 
 -- | 'save' but returning '()' instead of the saved model.
-save_ :: (Model r, FromRow r)
+save_ :: (Model r)
       => Connection -> r -> IO ()
 save_ c r = void $ save c r
 
@@ -1112,7 +1112,7 @@ save_ c r = void $ save c r
 --
 -- If the 'Model' is invalid (i.e. the return value of 'modelValid' is
 -- non-empty), a list of 'InvalidError' is returned instead.
-trySave :: forall r. (Model r, FromRow r)
+trySave :: forall r. Model r
         => Connection -> r -> IO (Either ValidationError r)
 trySave c r | not . H.null $ validationErrors errors = return $ Left errors
             | NullKey <- primaryKey r = do
@@ -1121,7 +1121,7 @@ trySave c r | not . H.null $ validationErrors errors = return $ Left errors
                              _    -> fail "save: database did not return row"
             | otherwise = do
                   rows <- query c (modelUpdateQuery qs) (UpdateRow r)
-                  case rows of [ret] -> return $ Right ret
+                  case rows of [r'] -> return $ Right $ lookupRow r'
                                _     -> fail $ "save: database updated "
                                           ++ show (length rows)
                                           ++ " records"
