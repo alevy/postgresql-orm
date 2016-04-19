@@ -111,6 +111,8 @@ import Control.Monad
 import qualified Data.Aeson as A
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Char8 as S8
+import qualified Data.Text as T
+import qualified Data.Text.Encoding as T
 import Data.Char
 import Data.Data
 import Data.Int
@@ -1132,17 +1134,33 @@ trySave c r | not . H.null $ validationErrors errors = return $ Left errors
 -- the database.  This function only looks at the primary key in the
 -- data structure.  It is an error to call this function if the
 -- primary key is not set.
-destroy :: forall a. (Model a) => Connection -> a -> IO ()
+destroy :: forall a. (Model a)
+  => Connection -> a -> IO (Either ValidationError Bool)
 destroy c a =
   case primaryKey a of
     NullKey -> fail "destroy: NullKey"
-    DBKey k -> void $ execute c
-               (modelDeleteQuery (modelQueries :: ModelQueries a)) (Only k)
+    DBKey k -> destroyByRef_ "destroy" c (DBRef k :: DBRef a)
 
 -- | Remove a row from the database without fetching it first.
-destroyByRef :: forall a rt. (Model a) => Connection -> GDBRef rt a -> IO ()
-destroyByRef c a =
-  void $ execute c (modelDeleteQuery (modelQueries :: ModelQueries a)) (Only a)
+destroyByRef :: forall a rt. (Model a)
+  => Connection -> GDBRef rt a -> IO (Either ValidationError Bool)
+destroyByRef = destroyByRef_ "destroyByRef"
+
+destroyByRef_ :: forall a rt. (Model a)
+  => T.Text -> Connection -> GDBRef rt a -> IO (Either ValidationError Bool)
+destroyByRef_ msg c a = action
+  where mq     = modelQueries     :: ModelQueries a
+        mi     = modelIdentifiers :: ModelIdentifiers a
+        pkCol  = modelQPrimaryColumn mi
+        action = do
+            n <- execute c (modelDeleteQuery mq) (Only a)
+            return $ case n of
+                0 -> Right False
+                1 -> Right True
+                _ -> Left $ validationError (T.decodeUtf8 pkCol) $
+                    msg <> ": DELETE modified " <> T.pack (show n) <>
+                    " rows. This may indicate that your primary key" <>
+                    " accessor field is not actually a primary key."
 
 -- | Print to stdout the query statement.
 printq :: Query -> IO ()
