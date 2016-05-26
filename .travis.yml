@@ -36,8 +36,6 @@ matrix:
 # - in install we install (haskell) dependencies
 before_install:
   - unset CC
-  - export PATH=$HOME/.cabal/bin:/opt/ghc/$GHCVER/bin:/opt/cabal/$CABALVER/bin:$PATH;;
-  - ./.travis-setup.sh
 
 install:
   - echo "$(ghc --version) [$(ghc --print-project-git-commit-id 2> /dev/null || echo '?')]"
