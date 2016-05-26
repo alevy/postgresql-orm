@@ -338,7 +338,7 @@ class GColumns f where
   gColumns :: f p -> [S.ByteString]
 instance GColumns U1 where
   gColumns _ = []
-instance (Selector c, RequireSelector c) => GColumns (M1 S c f) where
+instance (Selector c) => GColumns (M1 S c f) where
   gColumns s = [fromString $ selName s]
 instance (GColumns a, GColumns b) => GColumns (a :*: b) where
   gColumns ~(a :*: b) = gColumns a ++ gColumns b
@@ -355,7 +355,7 @@ defaultModelColumns = gColumns . from
 -- of this class, then move the 'DBKey' first in your data structure.
 class GPrimaryKey0 f where
   gPrimaryKey0 :: f p -> DBKey
-instance (RequireSelector c) => GPrimaryKey0 (S1 c (K1 i DBKey)) where
+instance GPrimaryKey0 (S1 c (K1 i DBKey)) where
   {-# INLINE gPrimaryKey0 #-}
   gPrimaryKey0 (M1 (K1 k)) = k
 instance (GPrimaryKey0 a) => GPrimaryKey0 (a :*: b) where
