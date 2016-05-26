@@ -1,12 +1,14 @@
-{-# LANGUAGE FlexibleInstances, UndecidableInstances #-}
+{-# LANGUAGE FlexibleInstances, UndecidableInstances, CPP #-}
 
 module Data.RequireSelector (RequireSelector) where
 
+#if defined(__GLASGOW_HASKELL__) && (__GLASGOW_HASKELL__ < 800)
 import GHC.Generics
 
 -- | There are intentionally no members of this class, so that placing
 -- it in a context will always cause an error.
 class IntentionallyCauseError a
+#endif
 
 -- | The point of this class is to ensure that you are using data
 -- types defined with record selectors (i.e., @data Foo = Foo { unFoo
@@ -20,5 +22,7 @@ class IntentionallyCauseError a
 -- @IntentionallyCauseError@, it means you failed to define one of
 -- your datatypes using record selector syntax.
 class RequireSelector a
+#if defined(__GLASGOW_HASKELL__) && (__GLASGOW_HASKELL__ < 800)
 instance (IntentionallyCauseError NoSelector) => RequireSelector NoSelector
+#endif
 instance RequireSelector a
