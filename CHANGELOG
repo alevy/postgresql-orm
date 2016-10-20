@@ -1,5 +1,9 @@
 # Change Log
 
+## v0.5.0
+
+* Support GHC 8
+
 ## v0.4.0
 
 * Upgrade to blaze-builder > 0.4 and migrate to bytestring builder
