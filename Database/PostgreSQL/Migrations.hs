@@ -117,7 +117,7 @@ create_table = (executeQuery_ .) . create_table_stmt
 -- | Returns a 'Query' that creates a table, for example:
 --
 -- @
---   create_table \"posts\"
+--   create_table_stmt \"posts\"
 --     [ column \"title\" \"VARCHAR(255) NOT NULL\"
 --     , column \"body\"  \"text\"]
 -- @
@@ -160,7 +160,7 @@ add_column  = ((executeQuery_ .) .) . add_column_stmt
 -- | Returns a 'Query' that adds a column to the given table. For example,
 --
 -- @
---   add_column \"posts\" \"title\" \"VARCHAR(255)\"
+--   add_column_stmt \"posts\" \"title\" \"VARCHAR(255)\"
 -- @
 --
 -- Returns the query
@@ -195,7 +195,7 @@ drop_column = (executeQuery_ .) . drop_column_stmt
 -- | Returns a 'Query' that drops a column from the given table. For example,
 --
 -- @
---   drop_column \"posts\" \"title\"
+--   drop_column_stmt \"posts\" \"title\"
 -- @
 --
 -- Returns the query
@@ -374,7 +374,7 @@ rename_column = ((executeQuery_ .) .) . rename_column_stmt
 -- | Returns a 'Query' that renames a column in the given table. For example,
 --
 -- @
---   rename_column \"posts\" \"title\" \"name\"
+--   rename_column_stmt \"posts\" \"title\" \"name\"
 -- @
 --
 -- Returns the query
@@ -413,7 +413,7 @@ change_column = ((executeQuery_ .) .) . change_column_stmt
 -- | Returns a 'Query' that alters a column in the given table. For example,
 --
 -- @
---   change_column \"posts\" \"title\" \"DROP DEFAULT\"
+--   change_column_stmt \"posts\" \"title\" \"DROP DEFAULT\"
 -- @
 --
 -- Returns the query
