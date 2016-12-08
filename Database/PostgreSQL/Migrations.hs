@@ -15,7 +15,7 @@ follows,
 >       create_table "posts"
 >         [ column "title" "VARCHAR(255) NOT NULL"
 >         , column "author_id" "integer references authors(id)"]
-> 
+>
 > down = migrate $ drop_table "posts"
 >
 -}
@@ -37,12 +37,17 @@ module Database.PostgreSQL.Migrations (
   , drop_column
   , drop_index
     -- ** Modifying
+  , rename_table
   , rename_column
   , change_column
+  , rename_index
+  , rename_sequence
+  , rename_constraint
     -- ** Statements
   , create_table_stmt, add_column_stmt, create_index_stmt
   , drop_table_stmt, drop_column_stmt, drop_index_stmt
-  , rename_column_stmt, change_column_stmt
+  , rename_table_stmt, rename_column_stmt, change_column_stmt
+  , rename_index_stmt, rename_sequence_stmt, rename_constraint_stmt
   ) where
 
 import Control.Monad
@@ -112,7 +117,7 @@ create_table = (executeQuery_ .) . create_table_stmt
 -- | Returns a 'Query' that creates a table, for example:
 --
 -- @
---   create_table \"posts\"
+--   create_table_stmt \"posts\"
 --     [ column \"title\" \"VARCHAR(255) NOT NULL\"
 --     , column \"body\"  \"text\"]
 -- @
@@ -155,7 +160,7 @@ add_column  = ((executeQuery_ .) .) . add_column_stmt
 -- | Returns a 'Query' that adds a column to the given table. For example,
 --
 -- @
---   add_column \"posts\" \"title\" \"VARCHAR(255)\"
+--   add_column_stmt \"posts\" \"title\" \"VARCHAR(255)\"
 -- @
 --
 -- Returns the query
@@ -190,7 +195,7 @@ drop_column = (executeQuery_ .) . drop_column_stmt
 -- | Returns a 'Query' that drops a column from the given table. For example,
 --
 -- @
---   drop_column \"posts\" \"title\"
+--   drop_column_stmt \"posts\" \"title\"
 -- @
 --
 -- Returns the query
@@ -205,6 +210,150 @@ drop_column_stmt :: S8.ByteString
                  -> Query
 drop_column_stmt tableName colName = Query $ S8.concat
   ["alter table ", quoteIdent tableName, " drop ", quoteIdent colName, ";"]
+
+-- | Renames the given table. For example,
+--
+-- @
+--   rename_table \"posts\" \"blog_posts\"
+-- @
+--
+-- renames the \"posts\" table to be called \"blog_posts\".
+rename_table :: S8.ByteString
+             -- ^ Table name
+             -> S8.ByteString
+             -- ^ New table name
+             -> Migration Int64
+rename_table = (executeQuery_ .) . rename_table_stmt
+
+-- | Returns a 'Query' that renames the given table. For example,
+--
+-- @
+--   rename_table_stmt \"posts\" \"blog_posts\"
+-- @
+--
+-- Returns the query
+--
+-- @
+--   ALTER TABLE \"posts\" RENAME TO \"blog_posts\";
+-- @
+rename_table_stmt :: S8.ByteString
+                  -- ^ Table name
+                  -> S8.ByteString
+                  -- ^ New table name
+                  -> Query
+rename_table_stmt tableName newTableName = Query $ S8.concat
+  [ "alter table ", quoteIdent tableName, " rename to"
+  , quoteIdent newTableName, ";"]
+
+-- | Renames the given index. For example,
+--
+-- @
+--   rename_index \"posts_pkey\" \"blog_posts_pkey\"
+-- @
+--
+-- renames the \"posts_pkey\" index to be called \"blog_posts_pkey\".
+rename_index :: S8.ByteString
+             -- ^ Index name
+             -> S8.ByteString
+             -- ^ New index name
+             -> Migration Int64
+rename_index = (executeQuery_ .) . rename_index_stmt
+
+-- | Returns a 'Query' that renames the given table. For example,
+--
+-- @
+--   rename_index_stmt \"posts_pkey\" \"blog_posts_pkey\"
+-- @
+--
+-- Returns the query
+--
+-- @
+--   ALTER INDEX \"posts\" RENAME TO \"blog_posts_pkey\";
+-- @
+rename_index_stmt :: S8.ByteString
+                  -- ^ Index name
+                  -> S8.ByteString
+                  -- ^ New index name
+                  -> Query
+rename_index_stmt indexName newIndexName = Query $ S8.concat
+  [ "alter index ", quoteIdent indexName, " rename to"
+  , quoteIdent newIndexName, ";"]
+
+-- | Renames the given sequence. For example,
+--
+-- @
+--   rename_sequence \"posts_id_seq\" \"blog_posts_id_seq\"
+-- @
+--
+-- renames the \"posts_id_seq\" sequence to be called \"blog_posts_id_seq\".
+rename_sequence :: S8.ByteString
+                -- ^ Sequence name
+                -> S8.ByteString
+                -- ^ New sequence name
+                -> Migration Int64
+rename_sequence = (executeQuery_ .) . rename_sequence_stmt
+
+-- | Returns a 'Query' that renames the given sequence. For example,
+--
+-- @
+--   rename_sequence_stmt \"posts_id_seq\" \"blog_posts_id_seq\"
+-- @
+--
+-- Returns the query
+--
+-- @
+--   ALTER SEQUENCE \"posts_id_seq\" RENAME TO \"blog_posts__id_seq\";
+-- @
+rename_sequence_stmt :: S8.ByteString
+                     -- ^ Sequence name
+                     -> S8.ByteString
+                     -- ^ New sequence name
+                     -> Query
+rename_sequence_stmt seqName newSeqName = Query $ S8.concat
+  [ "alter sequence ", quoteIdent seqName, " rename to"
+  , quoteIdent newSeqName, ";"]
+
+-- | Renames the given constraint. For example,
+--
+-- @
+--   rename_constraint \"posts\" \"posts_author_id_fkey\"
+--                               \"blog_posts_author_id_fkey\"
+-- @
+--
+-- renames the \"posts_author_id_fkey\" sequence to be called
+-- \"blog_posts_author_id_fkey\".
+rename_constraint :: S8.ByteString
+                  -- ^ Table name
+                  -> S8.ByteString
+                  -- ^ Constraint name
+                  -> S8.ByteString
+                  -- ^ New constraint name
+                  -> Migration Int64
+rename_constraint = ((executeQuery_ .) .) . rename_constraint_stmt
+
+-- | Returns a 'Query' that renames the given constraint. For example,
+--
+-- @
+--   rename_constraint_stmt \"posts\" \"posts_author_id_fkey\"
+--                                    \"blog_posts_author_id_fkey\"
+-- @
+--
+-- Returns the query
+--
+-- @
+--   ALTER TABLE \"posts\" RENAME CONSTRAINT \"posts_author_id_fkey\"
+--     RENAME TO \"blog_posts_author_id_fkey\";
+-- @
+rename_constraint_stmt :: S8.ByteString
+                       -- ^ Table name
+                       -> S8.ByteString
+                       -- ^ Constraint name
+                       -> S8.ByteString
+                       -- ^ New constraint name
+                       -> Query
+rename_constraint_stmt tbl conName newConName = Query $ S8.concat
+  [ "alter table ", quoteIdent tbl, " rename constraint"
+  , quoteIdent conName, "to", quoteIdent newConName, ";"]
 
 -- | Renames a column in the given table. For example,
 --
@@ -225,7 +374,7 @@ rename_column = ((executeQuery_ .) .) . rename_column_stmt
 -- | Returns a 'Query' that renames a column in the given table. For example,
 --
 -- @
---   rename_column \"posts\" \"title\" \"name\"
+--   rename_column_stmt \"posts\" \"title\" \"name\"
 -- @
 --
 -- Returns the query
@@ -264,7 +413,7 @@ change_column = ((executeQuery_ .) .) . change_column_stmt
 -- | Returns a 'Query' that alters a column in the given table. For example,
 --
 -- @
---   change_column \"posts\" \"title\" \"DROP DEFAULT\"
+--   change_column_stmt \"posts\" \"title\" \"DROP DEFAULT\"
 -- @
 --
 -- Returns the query
@@ -319,7 +468,7 @@ create_unique_index = ((executeQuery_ .) .) . (create_index_stmt True)
 -- @
 --   CREATE INDEX \"post_owner_index\" ON \"posts\" (\"owner\")
 -- @
-create_index_stmt :: Bool 
+create_index_stmt :: Bool
                   -- ^ Unique index?
                   -> S8.ByteString
                   -- ^ Index name
