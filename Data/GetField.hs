@@ -10,7 +10,6 @@
 #endif
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE AllowAmbiguousTypes #-}
--- ^ Enables the default implementation of Extractor as of GHC 8.0
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
 
