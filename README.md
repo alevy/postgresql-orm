@@ -19,11 +19,10 @@ Generics do the rest:
 
 ...
 
-data Post = Post {
-  { postId :: DBKey
-  , postTitle :: Text
-  , postBody :: Text
-  } deriving (Generic)
+data Post = Post { postId :: DBKey
+                 , postTitle :: Text
+                 , postBody :: Text
+                 } deriving (Generic)
 
 instance Model Post
 ```
@@ -104,8 +103,8 @@ cases, the a model definition might look like:
 data User = User { userId :: DBKey
                  , userFirstName :: String
                  , userLastName :: String
-                 , userAge :: Integer }
-              deriving (Generic)
+                 , userAge :: Integer
+                 } deriving (Generic)
 
 instance Model User
 ```
