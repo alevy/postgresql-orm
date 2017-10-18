@@ -130,7 +130,6 @@ import Database.PostgreSQL.Simple.Types
 import Database.PostgreSQL.ORM.Validations
 import GHC.Generics
 
-import Data.RequireSelector
 import Database.PostgreSQL.Escape (quoteIdent)
 
 -- | A type large enough to hold database primary keys.  Do not use
@@ -319,7 +318,7 @@ instance Show (ModelInfo a) where
 -- | This class returns the name of a datatype.
 class GDatatypeName f where
   gDatatypeName :: f p -> String
-instance (Datatype c) => GDatatypeName (D1 c f) where 
+instance (Datatype c) => GDatatypeName (D1 c f) where
   gDatatypeName a = datatypeName a
 -- | The default name of the database table corresponding to a Haskell
 -- type.  The default is the same as the type name with the first
@@ -1165,4 +1164,3 @@ destroyByRef_ msg c a = action
 -- | Print to stdout the query statement.
 printq :: Query -> IO ()
 printq (Query bs) = S8.putStrLn bs
-
