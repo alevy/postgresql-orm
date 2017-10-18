@@ -1,6 +1,6 @@
 import Database.PostgreSQL.Migrate
 import System.Environment
-import System.Exit 
+import System.Exit
 import System.FilePath
 import System.IO
 
@@ -19,9 +19,12 @@ main = do
     "new":name:[] -> newMigration name defaultMigrationsDir >>
                       return ExitSuccess
     "new":name:dir:[] -> newMigration name dir >> return ExitSuccess
+    "compile":out:[] -> compileMigrationsForDir defaultMigrationsDir out
+    "compile":out:dir:[] -> compileMigrationsForDir dir out
     _ -> do
       progName <- getProgName
       putStrLn $ "Usage: " ++ progName ++ " migrate|rollback [DIRECTORY]"
+      putStrLn $ "       " ++ progName ++ " compile [PROGRAM] [DIRECTORY]"
       putStrLn $ "       " ++ progName ++ " init"
       putStrLn $ "       " ++ progName ++ " dump [FILE]"
       putStrLn $ "       " ++ progName ++ " new NAME [DIRECTORY]"
@@ -29,4 +32,3 @@ main = do
   if ec == ExitSuccess then
     return ()
     else exitWith ec
-

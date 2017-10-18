@@ -9,9 +9,11 @@ module Database.PostgreSQL.Migrate
   ( initializeDb
   , runMigrationsForDir
   , runRollbackForDir
+  , compileMigrationsForDir
   , dumpDb
   , newMigration
   , defaultMigrationsDir
+  , getDirectoryMigrations
   , MigrationDetails(..)
   ) where
 
@@ -21,13 +23,19 @@ import Data.Time
 import Database.PostgreSQL.Simple hiding (connect)
 import qualified Data.ByteString.Char8 as S8
 import Database.PostgreSQL.Migrations
-import System.Exit 
+import Language.Haskell.Exts
+  (parseFile, fromParseResult,
+   Module(..), ModuleHead(..), ModuleName(..),
+   Decl(..), Pat(..), Name(..))
+import Language.Haskell.Exts.Pretty (prettyPrint)
+import System.Exit
 import GHC.IO.Handle
 import System.Process
 import System.Directory
 import System.FilePath
 import System.Environment
 import System.IO
+import System.IO.Temp (withTempDirectory)
 #if !MIN_VERSION_time(1,5,0)
 import System.Locale
 #endif
@@ -148,7 +156,7 @@ getDirectoryMigrations dir = do
   return $ map (splitFileVersionName dir) files
 
 splitFileVersionName :: FilePath -> FilePath -> MigrationDetails
-splitFileVersionName dir file = 
+splitFileVersionName dir file =
   let fileName = takeBaseName file
       parts    = foldr (\chr (hd:result) ->
                           if chr == '_' then
@@ -170,3 +178,77 @@ newMigration baseName dir = do
   origFile <- getDataFileName "static/migration.hs"
   copyFile origFile (dir </> filePath)
 
+
+compileMigrationsForDir :: FilePath -> FilePath -> IO ExitCode
+compileMigrationsForDir dir exe = do
+  migrations <- getDirectoryMigrations dir
+
+  -- Make temporary working directory.
+  withTempDirectory "." "migration-compile-" $ \tmpdir -> do
+--  ($ "migration-compile") $ \tmpdir -> do
+
+    -- Iterate over migrations in input directory, copying migration
+    -- file to working directory, modifying as:
+    --   - Add "module Migration<datestamp> (up, down) where" line at
+    --     beginning of file, after any LANGUAGE options.
+    --   - Remove any main function.
+    --   - Collect (label, MigrationYYMMDD) pairs.
+    moduleNames <- mapM (fixModule tmpdir) migrations
+
+    -- Copy main program text to working directory, including
+    -- migration list.
+    makeMain tmpdir $ zip moduleNames migrations
+
+    -- Copy compiler utilities.
+    utils <- getDataFileName "static/CompilerUtils.hs"
+    copyFile utils (tmpdir </> "CompilerUtils.hs")
+
+    -- Compile migrater, writing executable outside temporary
+    -- directory.
+    cwd <- getCurrentDirectory
+    system $ "cd " ++ tmpdir ++ "; ghc -o " ++ (cwd </> exe) ++ " Main.hs"
+
+-- | Turn migration scripts into valid modules.
+fixModule :: FilePath -> MigrationDetails -> IO String
+fixModule tmpdir (MigrationDetails path ver _) = do
+  let modulename = "Migration" ++ ver
+  modin <- parseFile path
+  let modout = removeMain $ addModuleHeader modulename $ fromParseResult modin
+  writeFile (tmpdir </> modulename <.> "hs") $ prettyPrint modout
+  return modulename
+
+-- | Add "MigrationYYYYMMDDHHMMSS" module header.
+addModuleHeader :: String -> Module l -> Module l
+addModuleHeader name (Module sinfo _ pragmas imports decls) =
+  Module sinfo (Just header) pragmas imports decls
+  where header = ModuleHead sinfo (ModuleName sinfo name) Nothing Nothing
+addModuleHeader _ _ = error "Something wrong..."
+
+-- | Remove main function.
+removeMain :: Module l -> Module l
+removeMain (Module sinfo header pragmas imports decls) =
+  Module sinfo header pragmas imports $ filter (not . isMain) decls
+  where isMain :: Decl l -> Bool
+        isMain (TypeSig _ [Ident _ "main"] _) = True
+        isMain (PatBind _ (PVar _ (Ident _ "main")) _ _) = True
+        isMain _ = False
+removeMain _ = error "Something wrong..."
+
+-- | Write main program.
+makeMain :: FilePath -> [(String, MigrationDetails)] -> IO ()
+makeMain tmpdir migrations =
+  withFile (tmpdir </> "Main.hs") WriteMode $ \h -> do
+    hPutStrLn h "module Main where\n"
+    hPutStrLn h "import CompilerUtils\n"
+    forM_ migrations $ \(modname, _) -> hPutStrLn h $ "import qualified " ++ modname
+    hPutStrLn h "\nmigrations :: MigrationMap"
+    hPutStrLn h "migrations = fromList"
+    let migs = zipWith (++) ("  [ " : repeat "  , ") $ map doone migrations
+    hPutStrLn h $ unlines migs
+    hPutStrLn h "  ]\n"
+    hPutStrLn h "main :: IO ()"
+    hPutStrLn h "main = compiledMain migrations"
+    where doone (modname, MigrationDetails _ ver name) =
+            "(\"" ++ ver ++ "\",\n" ++
+            "     Migration \"" ++ ver ++ "_" ++ name ++ "\" " ++
+            modname ++ ".up " ++ modname ++ ".down)"

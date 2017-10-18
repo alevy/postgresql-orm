@@ -28,7 +28,6 @@ import Database.PostgreSQL.Simple.ToRow
 import Database.PostgreSQL.Simple.Types
 import Foreign.Marshal.Alloc (mallocBytes)
 import Foreign.Storable (pokeByteOff)
-import Foreign.Ptr
 import GHC.Prim (Addr#, and#, geAddr#, geWord#, Int#, int2Word#
                 , minusAddr#, ord# , plusAddr#, readWord8OffAddr#
                 , State# , uncheckedShiftRL#, word2Int#, writeWord8OffAddr#
