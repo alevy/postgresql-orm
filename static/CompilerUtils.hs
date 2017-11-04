@@ -10,7 +10,8 @@ import qualified Data.Map as M
 import Database.PostgreSQL.Simple
   (Connection, Only(..), execute, query_, begin, commit)
 import Database.PostgreSQL.Migrations (connectEnv)
-import System.Environment (getArgs)
+import Database.PostgreSQL.Migrate (initializeDb)
+import System.Environment (getArgs, getProgName)
 
 type Version = String
 
@@ -25,9 +26,15 @@ compiledMain :: MigrationMap -> IO ()
 compiledMain migrations = do
   args <- getArgs
   case args of
+    "init":[] -> initializeDb
     "list":[] -> listMigrations migrations
     "migrate":[] -> runMigrations migrations
     "rollback":[] -> runRollback migrations
+    _ -> do
+      progName <- getProgName
+      putStrLn $ "Usage: " ++ progName ++ " migrate|rollback"
+      putStrLn $ "       " ++ progName ++ " list"
+      putStrLn $ "       " ++ progName ++ " init"
 
 listMigrations :: MigrationMap -> IO ()
 listMigrations migrations =
