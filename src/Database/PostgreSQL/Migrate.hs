@@ -17,6 +17,7 @@ module Database.PostgreSQL.Migrate
   , MigrationDetails(..)
   ) where
 
+import Control.Exception (bracket)
 import Control.Monad
 import Data.List
 import Data.Time
@@ -72,8 +73,7 @@ dumpDb outputFile = do
 -- | Initializes the database by creating a \"schema-migrations\" table.
 -- This table must exist before running any migrations.
 initializeDb :: IO ()
-initializeDb = do
-  conn <- connectEnv
+initializeDb = bracket connectEnv close $ \conn ->
   void $ execute_ conn
     "create table if not exists schema_migrations (version VARCHAR(28))"
 
@@ -87,8 +87,7 @@ initializeDb = do
 runMigrationsForDir :: Handle -- ^ Log output (probably stdout)
                     -> FilePath -- ^ Path to directory containing migrations
                     -> IO ExitCode
-runMigrationsForDir logOut dir = do
-  conn <- connectEnv
+runMigrationsForDir logOut dir = bracket connectEnv close $ \conn -> do
   res <- query_ conn
           "select version from schema_migrations order by version desc limit 1"
   let latestVersion = case res of
@@ -116,8 +115,7 @@ runMigration (MigrationDetails file vers _) = do
     [file, "up", vers, "--with-db-commit"]
 
 runRollbackForDir :: FilePath -> IO ExitCode
-runRollbackForDir dir = do
-  conn <- connectEnv
+runRollbackForDir dir = bracket connectEnv close $ \conn -> do
   res <- query_ conn
           "select version from schema_migrations order by version desc limit 1"
   case res of
