@@ -1,0 +1,19 @@
+resolver: lts-13.6
+    
+package-indices:
+- name: Hackage
+  download-prefix: https://s3.amazonaws.com/hackage.fpcomplete.com/package/
+  http: https://s3.amazonaws.com/hackage.fpcomplete.com/00-index.tar.gz
+
+packages:
+- '.'
+
+extra-deps: []
+
+extra-package-dbs: []
+
+ignore-revision-mismatch: true
+
+ghc-options:
+  $locals: -Wall -fdiagnostics-color=always
+
