@@ -50,6 +50,7 @@ module Database.PostgreSQL.Migrations (
   , rename_index_stmt, rename_sequence_stmt, rename_constraint_stmt
   ) where
 
+import Control.Exception (bracket)
 import Control.Monad
 import Control.Monad.Reader
 import qualified Data.ByteString as S
@@ -525,8 +526,7 @@ defaultMain :: (Connection -> IO ()) -- ^ Migration function
 defaultMain up down = do
   (Just cmdArgs) <- getArgs >>= return . parseCmdArgs
   case cmd cmdArgs of
-    "up" -> do
-      conn <- connectEnv
+    "up" -> bracket connectEnv close $ \conn -> do
       res <- query_ conn
           "select version from schema_migrations order by version desc limit 1"
       let currentVersion = case res of
@@ -542,8 +542,7 @@ defaultMain up down = do
             commit conn
             else rollback conn
         else exitWith $ ExitFailure 1
-    "down" -> do
-      conn <- connectEnv
+    "down" -> bracket connectEnv close $ \conn -> do
       res <- query_ conn
           "select version from schema_migrations order by version desc limit 1"
       let currentVersion = case res of
@@ -561,4 +560,3 @@ defaultMain up down = do
         else
           exitWith $ ExitFailure 1
     _ -> exitWith $ ExitFailure 1
-
