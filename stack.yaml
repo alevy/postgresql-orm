@@ -1,4 +1,4 @@
-resolver: lts-13.6
+resolver: lts-13.28
     
 package-indices:
 - name: Hackage
@@ -17,3 +17,5 @@ ignore-revision-mismatch: true
 ghc-options:
   $locals: -Wall -fdiagnostics-color=always
 
+nix:
+  packages: [postgresql]
