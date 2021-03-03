@@ -166,7 +166,7 @@ instance A.ToJSON DBKey where
 instance A.FromJSON DBKey where
   parseJSON (A.Number a) = return $ DBKey (floor a)
   parseJSON A.Null = return NullKey
-  parseJSON _ = error "Expected Number or Null"
+  parseJSON _ = fail "Expected Number or Null"
 
 instance Eq DBKey where
   (DBKey a) == (DBKey b) = a == b
@@ -206,7 +206,7 @@ instance A.ToJSON (GDBRef t a) where
 
 instance A.FromJSON (GDBRef t a) where
   parseJSON (A.Number n) = return $ DBRef (floor n)
-  parseJSON _ = error "Expected Number"
+  parseJSON _ = fail "Expected Number"
 
 instance (Model t) => Show (GDBRef rt t) where
   showsPrec n (DBRef k) = showsPrec n k
